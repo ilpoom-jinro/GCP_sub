@@ -1,3 +1,9 @@
+# servicenetworking API 활성화 (VPC 네트워크 피어링을 위해 필요)
+resource "google_project_service" "service_networking" {
+  service = "servicenetworking.googleapis.com"
+  disable_on_destroy = false
+}
+
 # 1. VPC 생성 (자동 생성 서브넷 비활성화)
 resource "google_compute_network" "vpc_gcp_prd" {
   name                    = "vpc-gcp-prd"
