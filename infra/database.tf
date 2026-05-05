@@ -22,6 +22,9 @@ resource "google_sql_database_instance" "dr_standby_db" {
   database_version = "MYSQL_8_0"
   region           = "asia-northeast3"
 
+  # 이 줄을 명시적으로 추가해야 테라폼이 삭제를 승인합니다.
+  deletion_protection = false
+
   # 위에서 만든 Private Connection에 의존 (이게 완료되어야 DB 생성 시작)
   depends_on = [google_service_networking_connection.private_vpc_connection]
 
