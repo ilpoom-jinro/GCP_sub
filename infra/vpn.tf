@@ -9,7 +9,7 @@ resource "google_compute_instance" "headscale_vpn" {
     network    = google_compute_network.vpc_gcp_prd.id
     subnetwork = google_compute_subnetwork.subnet_sec.id
     
-    # Public IP 부여 (온프레미스 노트북이 클라우드 VPN으로 찾아오기 위해 필수)
+    # Public IP 부여
     access_config {
       network_tier = "PREMIUM"
     }
@@ -22,7 +22,7 @@ resource "google_compute_instance" "headscale_vpn" {
     }
   }
 
-  # ★ 바로 이곳입니다! 이 태그 덕분에 IAP를 통해 이 VM에 안전하게 SSH 접속이 가능해집니다.
+  # IAP를 통해 VM에 SSH 접속
   tags = ["allow-iap-ssh"]
 
   # IP 포워딩 활성화 (VPN 라우터 역할을 하기 위해 필수 설정)
@@ -35,8 +35,15 @@ resource "google_compute_instance" "headscale_vpn" {
     echo 'net.ipv4.ip_forward = 1' | sudo tee -a /etc/sysctl.d/99-custom.conf
     sudo sysctl -p /etc/sysctl.d/99-custom.conf
 
-    # Headscale 클라이언트 설치 (수동 설치의 번거로움 제거)
+    # Headscale 클라이언트 설치
     curl -fsSL https://tailscale.com/install.sh | sh
+
+    # SNAT 설정 (GKE Pod가 AWS와 통신할 수 있게 IP를 라우터 IP로 위장)
+    iptables -t nat -A POSTROUTING -o tailscale0 -j MASQUERADE
+
+    # 재부팅 시에도 iptables 유지되도록 저장 (iptables-persistent 패키지 필요할 수 있음)
+    apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent
+    netfilter-persistent save
   EOF
 }
 
