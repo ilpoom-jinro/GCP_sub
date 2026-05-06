@@ -23,7 +23,7 @@ resource "google_compute_instance" "headscale_vpn" {
   }
 
   # IAP를 통해 VM에 SSH 접속
-  tags = ["allow-iap-ssh"]
+  tags = ["allow-iap-ssh", "headscale-router"]
 
   # IP 포워딩 활성화 (VPN 라우터 역할을 하기 위해 필수 설정)
   can_ip_forward = true 
@@ -40,17 +40,25 @@ resource "google_compute_instance" "headscale_vpn" {
 
     # SNAT 설정 (GKE Pod가 AWS와 통신할 수 있게 IP를 라우터 IP로 위장)
     iptables -t nat -A POSTROUTING -o tailscale0 -j MASQUERADE
+    # mtu 문제 방지 위해 TCP MSS 조정 (VPN 통신 안정성 향상, 패킷이 커져도 MTU에 맞게 조정)
+    iptables -t mangle -A FORWARD -o tailscale0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 
     # 재부팅 시에도 iptables 유지되도록 저장 (iptables-persistent 패키지 필요할 수 있음)
     apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent
     netfilter-persistent save
+
+    # tailscale 실행 커맨드 추가 예정
+    # --advertise-routes: GCP의 서브넷 대역을 다른 노드(AWS 등)에 알림
+    # --snat-subnet-routes=false: Tailscale 자체 SNAT를 끄고, 우리가 설정한 iptables SNAT를 사용
+    # tailscale up --login-server http://<오라클_IP>:8080 --authkey <토큰> --advertise-routes=10.20.0.0/16 --snat-subnet-routes=false
+
   EOF
 }
 
 # GKE -> AWS 통신을 위한 라우팅 테이블
 resource "google_compute_route" "route_to_aws" {
   name        = "route-to-aws-via-vpn"
-  # AWS VPC의 전체 CIDR 대역을 입력하세요 (예: 10.10.0.0/16)
+  # AWS VPC의 전체 CIDR 대역을 입력하세요 (예: 10.10.0.0/16, 변경 예정)
   dest_range  = "10.10.0.0/16" 
   network     = google_compute_network.vpc_gcp_prd.name #
   
