@@ -28,7 +28,7 @@ resource "google_compute_instance" "headscale_vpn" {
   # IP 포워딩 활성화 (VPN 라우터 역할을 하기 위해 필수 설정)
   can_ip_forward = true 
 
-  # ★ [추가됨] VM이 켜질 때 자동으로 실행되는 스크립트
+  # VM이 켜질 때 자동으로 실행되는 스크립트
   metadata_startup_script = <<-EOF
     #!/bin/bash
     # OS 레벨 패킷 포워딩 켜기 (라우터 필수 설정)
@@ -47,14 +47,14 @@ resource "google_compute_instance" "headscale_vpn" {
   EOF
 }
 
-# ★ [핵심 추가 리소스] GKE -> AWS 통신을 위한 라우팅 테이블
+# GKE -> AWS 통신을 위한 라우팅 테이블
 resource "google_compute_route" "route_to_aws" {
   name        = "route-to-aws-via-vpn"
   # AWS VPC의 전체 CIDR 대역을 입력하세요 (예: 10.10.0.0/16)
   dest_range  = "10.10.0.0/16" 
   network     = google_compute_network.vpc_gcp_prd.name #
   
-  # 위에서 지정한 AWS 대역으로 가는 트래픽은 이 VPN 인스턴스로 보내라!
+  # 위에서 지정한 AWS 대역으로 가는 트래픽은 이 VPN 인스턴스로 보내라
   next_hop_instance = google_compute_instance.headscale_vpn.id
   next_hop_instance_zone = google_compute_instance.headscale_vpn.zone
   
