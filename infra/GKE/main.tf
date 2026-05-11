@@ -11,7 +11,15 @@ data "google_compute_subnetwork" "subnet_was_gke" {
 # 2. GKE 클러스터 본체
 resource "google_container_cluster" "primary" {
   name     = "gke-prd-cluster"
-  location = "asia-northeast3-a" # 단일 AZ
+  location = "asia-northeast3-a"
+
+  #  CNI cilium 사용
+  datapath_provider = "ADVANCED_DATAPATH"
+
+  ip_allocation_policy {
+    cluster_secondary_range_name  = "gke-pod-range"
+    services_secondary_range_name = "gke-svc-range"
+  }
 
   remove_default_node_pool = true
   initial_node_count       = 1
