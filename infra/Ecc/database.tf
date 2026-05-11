@@ -22,11 +22,14 @@ resource "google_sql_database_instance" "dr_standby_db" {
   database_version = "MYSQL_8_0"
   region           = "asia-northeast3"
 
-  # 이 줄을 명시적으로 추가해야 테라폼이 삭제를 승인합니다.
+  # KMS 열쇠를 사용하도록 설정 (CMEK)
+  encryption_key_name = google_kms_crypto_key.sql_disk_key.id
+
+  # 테라폼으로 destroy할 수 있도록 하는 코드
   deletion_protection = false
 
-  # 위에서 만든 Private Connection에 의존 (이게 완료되어야 DB 생성 시작)
-  depends_on = [google_service_networking_connection.private_vpc_connection]
+  # 위에서 만든 Private Connection, KMS 권한 생성에 의존 (이게 완료되어야 DB 생성 시작)
+  depends_on = [google_service_networking_connection.private_vpc_connection, google_kms_crypto_key_iam_member.sql_kms_binding]
 
   settings {
     tier = "db-f1-micro" # [Cost Opt] 포트폴리오용이므로 가장 저렴한 최소 사양 사용
