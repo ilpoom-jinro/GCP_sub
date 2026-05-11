@@ -61,5 +61,6 @@ resource "google_sql_database" "main_db" {
 resource "google_sql_user" "db_user" {
   name     = "admin"
   instance = google_sql_database_instance.dr_standby_db.name
-  password = "SuperSecretPassword123!" # 실무에선 Secret Manager 연동 필수!
+  # security.tf에서 생성한 랜덤 패스워드를 동적으로 끌어옵니다.
+  password = random_password.db_password.result
 }
