@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: laptop-db-service   # 앱들이 호출할 가상의 이름
+  namespace: default
+spec:
+  type: ExternalName
+  externalName: 10.100.0.5  #  여기에 실제 노트북이 Headscale VPN에서 할당받은 IP를 적어야 합니다.
