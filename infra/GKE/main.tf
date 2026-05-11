@@ -19,6 +19,7 @@ resource "google_container_cluster" "primary" {
   ip_allocation_policy {
     cluster_secondary_range_name  = "gke-pod-range"
     services_secondary_range_name = "gke-svc-range"
+  }
 
   remove_default_node_pool = true
   initial_node_count       = 1
