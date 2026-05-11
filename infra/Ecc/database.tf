@@ -34,6 +34,12 @@ resource "google_sql_database_instance" "dr_standby_db" {
   settings {
     tier = "db-f1-micro" # [Cost Opt] 포트폴리오용이므로 가장 저렴한 최소 사양 사용
     
+    # 구글 IAM이 아니라, MySQL 엔진에게 직접 지시하는 설정(Flag)
+    database_flags {
+      name  = "general_log" # 또는 MySQL 감사 플러그인 플래그
+      value = "on"
+    }
+
     # 디스크 자동 확장 켜기
     disk_autoresize = true
 
