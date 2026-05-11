@@ -1,6 +1,6 @@
 # 1. 경한님이 만든 네트워크 정보 불러오기
 data "google_compute_network" "vpc" {
-  name = "vpc-gcp-prd" 
+  name = "vpc-gcp-prd"
 }
 
 data "google_compute_subnetwork" "subnet_was_gke" {
@@ -36,7 +36,7 @@ resource "google_container_node_pool" "spot_nodes" {
   node_config {
     preemptible  = true # Spot 인스턴스 활성화
     spot         = true
-    machine_type = "e2-medium" 
+    machine_type = "e2-medium"
 
     oauth_scopes = [
       "https://www.googleapis.com/auth/cloud-platform"
