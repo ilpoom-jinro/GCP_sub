@@ -32,14 +32,14 @@ resource "google_project_iam_audit_config" "secret_manager_audit" {
 }
 
 # (선택) Cloud SQL에 대한 감사 로그 활성화
-resource "google_project_iam_audit_config" "cloud_sql_audit" {
-  project = var.project_number
-  service = "sqladmin.googleapis.com"
+# resource "google_project_iam_audit_config" "cloud_sql_audit" {
+#   project = var.project_number
+#   service = "sqladmin.googleapis.com"
 
-  audit_log_config {
-    log_type = "DATA_WRITE"
-  }
-  audit_log_config {
-    log_type = "DATA_READ"
-  }
-}
+#   audit_log_config {
+#     log_type = "DATA_WRITE"
+#   }
+#   audit_log_config {
+#     log_type = "DATA_READ"
+#   }
+# }

@@ -38,15 +38,16 @@ resource "google_secret_manager_secret_iam_member" "gke_sa_secret_access" {
 # 1. Workload Identity 연동 (K8s 앱 -> GCP Secret Manager 접속용)
 # GKE 내부의 'app-ksa'라는 쿠버네티스 계정이, GCP의 'gke-app-sa' 신분증을 
 # 빌려 쓸 수 있도록(Impersonate) 허락해 주는 브릿지 코드.
+# 이건 GKE 클러스터 생성 후에 적용해야 합니다. (왜냐면 gke-app-sa가 GKE 클러스터에서 사용될 때까지 기다려야 하니까요)
 
-resource "google_service_account_iam_member" "workload_identity_binding" {
-  service_account_id = google_service_account.gke_sa.name
-  role               = "roles/iam.workloadIdentityUser"
+# resource "google_service_account_iam_member" "workload_identity_binding" {
+#   service_account_id = google_service_account.gke_sa.name
+#   role               = "roles/iam.workloadIdentityUser"
   
-  # 구글이 정해둔 Workload Identity 멤버 형식 (외우지 말고 복붙하세요!)
-  # 형식: serviceAccount:[프로젝트ID].svc.id.goog[[K8s네임스페이스]/[K8s서비스계정명]]
-  member = "serviceAccount:${var.project_number}.svc.id.goog[default/app-ksa]"
-}
+#   # 구글이 정해둔 Workload Identity 멤버 형식 (외우지 말고 복붙하세요!)
+#   # 형식: serviceAccount:[프로젝트ID].svc.id.goog[[K8s네임스페이스]/[K8s서비스계정명]]
+#   member = "serviceAccount:${var.project_number}.svc.id.goog[default/app-ksa]"
+# }
 
 # -------------------------------------------------------------------------
 # 2. IAP (Identity-Aware Proxy) SSH 터널링 접속 권한 부여
