@@ -59,7 +59,7 @@ resource "google_compute_instance" "headscale_vpn" {
 resource "google_compute_route" "route_to_aws" {
   name        = "route-to-aws-via-vpn"
   # AWS VPC의 전체 CIDR 대역을 입력하세요
-  dest_range  = "10.40.0.0/16" 
+  dest_range  = ["10.10.0.0/16", "10.20.0.0/16", "10.30.0.0/16", "10.40.0.0/16"] 
   network     = google_compute_network.vpc_gcp_prd.name #
   
   # 위에서 지정한 AWS 대역으로 가는 트래픽은 이 VPN 인스턴스로 보내라
