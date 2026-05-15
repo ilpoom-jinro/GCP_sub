@@ -1,0 +1,38 @@
+name: "App CI (Docker Build & Push)"
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'app/**'  # 나중에 앱 코드가 이 폴더에 들어올 때만 작동하도록 설정
+
+jobs:
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # ---------------------------------------------------------
+      # [주의] 아래는 추후 GCP 프로젝트와 연결될 때 주석을 해제할 영역.
+      # ---------------------------------------------------------
+      
+      # 1단계: GCP 인증 (나중에 Workload Identity Federation 설정 필요)
+      # - name: Authenticate to Google Cloud
+      #   uses: google-github-actions/auth@v2
+      #   with:
+      #     workload_identity_provider: '공급자_주소'
+      #     service_account: '깃허브액션_전용_서비스계정_이메일'
+
+      # 2단계: GCP Artifact Registry 로그인
+      # - name: Set up Cloud SDK
+      #   uses: google-github-actions/setup-gcloud@v2
+      # - name: Configure Docker
+      #   run: gcloud auth configure-docker asia-northeast3-docker.pkg.dev
+
+      # 3단계: Docker 이미지 빌드 및 푸시 (지금은 빌드 흉내만)
+      - name: Dummy Docker Build
+        run: |
+          echo "앱 코드가 없으므로 가상의 빌드를 수행."
+          echo "나중에 여기에 docker build -t my-app . 및 docker push 명령어추가."
