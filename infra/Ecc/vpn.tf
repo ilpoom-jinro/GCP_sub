@@ -58,8 +58,8 @@ resource "google_compute_instance" "headscale_vpn" {
 # GKE -> AWS 통신을 위한 라우팅 테이블
 resource "google_compute_route" "route_to_aws" {
   name        = "route-to-aws-via-vpn"
-  # AWS VPC의 전체 CIDR 대역을 입력하세요 (예: 10.10.0.0/16, 변경 예정)
-  dest_range  = "10.10.0.0/16" 
+  # AWS VPC의 전체 CIDR 대역을 입력하세요
+  dest_range  = "10.40.0.0/16" 
   network     = google_compute_network.vpc_gcp_prd.name #
   
   # 위에서 지정한 AWS 대역으로 가는 트래픽은 이 VPN 인스턴스로 보내라

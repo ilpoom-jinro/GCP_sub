@@ -16,7 +16,7 @@ resource "google_compute_subnetwork" "subnet_web" {
   name          = "subnet-web"
   network       = google_compute_network.vpc_gcp_prd.id
   region        = "asia-northeast3"
-  ip_cidr_range = "10.20.1.0/24" # 256개 IP
+  ip_cidr_range = "10.50.1.0/24" # 256개 IP
   
   private_ip_google_access = true # 공인 ip 없이도 구글 내부 API (GCS 버킷 등) 접근 허용
 }
@@ -28,18 +28,18 @@ resource "google_compute_subnetwork" "subnet_was_gke" {
   region        = "asia-northeast3"
   
   # Primary Range (GKE 노드용)
-  ip_cidr_range = "10.20.2.0/24" 
+  ip_cidr_range = "10.50.2.0/24" 
 
   # Secondary Range 1 (GKE Pod용)
   secondary_ip_range {
     range_name    = "gke-pod-range"
-    ip_cidr_range = "10.21.0.0/16" 
+    ip_cidr_range = "10.51.0.0/16" 
   }
 
   # Secondary Range 2 (GKE Service용)
   secondary_ip_range {
     range_name    = "gke-svc-range"
-    ip_cidr_range = "10.22.0.0/20" 
+    ip_cidr_range = "10.52.0.0/20" 
   }
 
   private_ip_google_access = true
@@ -50,7 +50,7 @@ resource "google_compute_subnetwork" "subnet_db" {
   name          = "subnet-db"
   network       = google_compute_network.vpc_gcp_prd.id
   region        = "asia-northeast3"
-  ip_cidr_range = "10.20.3.0/24" 
+  ip_cidr_range = "10.50.3.0/24" 
   private_ip_google_access = true
 }
 
@@ -59,6 +59,6 @@ resource "google_compute_subnetwork" "subnet_sec" {
   name          = "subnet-sec"
   network       = google_compute_network.vpc_gcp_prd.id
   region        = "asia-northeast3"
-  ip_cidr_range = "10.20.4.0/24" 
+  ip_cidr_range = "10.50.4.0/24" 
   private_ip_google_access = true
 }

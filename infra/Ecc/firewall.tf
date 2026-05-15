@@ -23,7 +23,7 @@ resource "google_compute_firewall" "allow_internal" {
   network = google_compute_network.vpc_gcp_prd.name
 
   # 합의한 VPC 전체 대역 내에서의 통신 허용
-  source_ranges = ["10.20.0.0/16", "10.21.0.0/16", "10.22.0.0/20"] # VPC와 서브넷, GKE pod, GKE Service 대역을 모두 포함하는 CIDR 범위로 설정
+  source_ranges = ["10.50.0.0/16", "10.51.0.0/16", "10.52.0.0/20"] # VPC와 서브넷, GKE pod, GKE Service 대역을 모두 포함하는 CIDR 범위로 설정
 
   allow {
     protocol = "tcp"
@@ -43,7 +43,7 @@ resource "google_compute_firewall" "allow_tailscale" {
   network = google_compute_network.vpc_gcp_prd.name
   
   # 전 세계(0.0.0.0/0)를 대상으로 열거나, AWS/오라클 IP만 특정하여 허용, 오라클 IP는 나중에 추가 예정
-  source_ranges = ["0.0.0.0/0"] 
+  source_ranges = ["10.40.0.0/16"] 
 
   allow {
     protocol = "udp"
