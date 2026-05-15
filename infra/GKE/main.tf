@@ -37,7 +37,6 @@ resource "google_container_node_pool" "spot_nodes" {
   node_count = 2 # 기본 2대로 시작 (필요시 변경 가능)
 
   node_config {
-    preemptible  = true # Spot 인스턴스 활성화
     spot         = true
     machine_type = "e2-medium"
 
