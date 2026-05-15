@@ -57,19 +57,20 @@ resource "google_compute_instance" "headscale_vpn" {
     # tailscale 실행 커맨드 추가 예정
     # --advertise-routes: GCP의 서브넷 대역을 다른 노드(AWS 등)에 알림
     # --snat-subnet-routes=false: Tailscale 자체 SNAT를 끄고, 우리가 설정한 iptables SNAT를 사용
-    # tailscale up --login-server http://<오라클_IP>:8080 --authkey <토큰> --advertise-routes=10.20.0.0/16 --snat-subnet-routes=false
+    # tailscale up --login-server http://<오라클_IP>:8080 --authkey <토큰> --advertise-routes=10.50.0.0/16,10.51.0.0/16,10.52.0.0/20 --snat-subnet-routes=false
 
   EOF
 }
 
 # GKE -> AWS 통신을 위한 라우팅 테이블
 resource "google_compute_route" "route_to_aws" {
-  name        = "route-to-aws-via-vpn"
-  # AWS VPC의 전체 CIDR 대역을 입력하세요
-  dest_range  = ["10.10.0.0/16", "10.20.0.0/16", "10.30.0.0/16", "10.40.0.0/16"] 
-  network     = google_compute_network.vpc_gcp_prd.name #
+  for_each = toset(["10.10.0.0/16", "10.20.0.0/16", "10.30.0.0/16", "10.40.0.0/16"])
+
+  # route-to-aws-10-10, route-to-aws-10-20 식으로 이름이 자동 생성됨
+  name        = "route-to-aws-${replace(each.value, "/[./]/", "-")}"
+  dest_range  = each.value
+  network     = google_compute_network.vpc_gcp_prd.name
   
-  # 위에서 지정한 AWS 대역으로 가는 트래픽은 이 VPN 인스턴스로 보내라
   next_hop_instance = google_compute_instance.headscale_vpn.id
   next_hop_instance_zone = google_compute_instance.headscale_vpn.zone
   
