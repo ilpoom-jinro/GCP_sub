@@ -1,3 +1,9 @@
+# 0. Headscale VPN용 고정 공인 IP 생성 (지역: 서울)
+resource "google_compute_address" "vpn_static_ip" {
+  name   = "headscale-vpn-static-ip"
+  region = "asia-northeast3"
+}
+
 # 1. 하이브리드 통신을 위한 Headscale (VPN) 인스턴스
 resource "google_compute_instance" "headscale_vpn" {
   name         = "headscale-vpn-server"
@@ -11,6 +17,7 @@ resource "google_compute_instance" "headscale_vpn" {
     
     # Public IP 부여
     access_config {
+      nat_ip         = google_compute_address.vpn_static_ip.address
       network_tier = "PREMIUM"
     }
   }

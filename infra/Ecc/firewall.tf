@@ -47,7 +47,7 @@ resource "google_compute_firewall" "allow_tailscale" {
 
   allow {
     protocol = "udp"
-    ports    = ["41641"]
+    ports    = ["41641, 51820"] # 41641은 tailscale, 51820은 wireguard 기본 포트.
   }
   
   target_tags = ["headscale-router"] # VPN VM에 이 태그를 추가하세요.
