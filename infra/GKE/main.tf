@@ -16,6 +16,7 @@ resource "google_container_cluster" "primary" {
   #  CNI cilium 사용
   datapath_provider = "ADVANCED_DATAPATH"
 
+  # Secondary Range 연결 (VPC-native 클러스터 설정)
   ip_allocation_policy {
     cluster_secondary_range_name  = "gke-pod-range"
     services_secondary_range_name = "gke-svc-range"
@@ -26,12 +27,6 @@ resource "google_container_cluster" "primary" {
 
   network    = data.google_compute_network.vpc.id
   subnetwork = data.google_compute_subnetwork.subnet_was_gke.id
-
-  # 경한님이 설정한 Secondary Range 연결 (VPC-native 클러스터 설정)
-  ip_allocation_policy {
-    cluster_secondary_range_name  = "gke-pod-range"
-    services_secondary_range_name = "gke-svc-range"
-  }
 }
 
 # 3. Spot 인스턴스 노드 풀
@@ -42,7 +37,6 @@ resource "google_container_node_pool" "spot_nodes" {
   node_count = 2 # 기본 2대로 시작 (필요시 변경 가능)
 
   node_config {
-    preemptible  = true # Spot 인스턴스 활성화
     spot         = true
     machine_type = "e2-medium"
 
