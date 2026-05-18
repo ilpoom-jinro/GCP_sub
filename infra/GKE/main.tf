@@ -29,6 +29,11 @@ resource "google_container_cluster" "primary" {
   subnetwork = data.google_compute_subnetwork.subnet_was_gke.id
 }
 
+ workload_identity_config {
+    workload_pool = "${var.project_number}.svc.id.goog"
+  }
+}
+
 # 3. Spot 인스턴스 노드 풀
 resource "google_container_node_pool" "spot_nodes" {
   name       = "spot-node-pool"
