@@ -2,7 +2,7 @@
 
 # 1. KeyRing (열쇠고리) 생성 - 리전별로 하나씩 두는 것이 정석입니다.
 resource "google_kms_key_ring" "db_keyring" {
-  name     = "ilpoomjinro-db-keyring-v1"
+  name     = "ilpoomjinro-db-keyring-v2"
   location = "asia-northeast3" # GCP 서울 리전
 }
 
