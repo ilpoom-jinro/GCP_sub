@@ -1,3 +1,8 @@
+variable "project_number" {
+  description = "GCP Project Number (or ID)"
+  type        = string
+}
+
 # 1. 경한님이 만든 네트워크 정보 불러오기
 data "google_compute_network" "vpc" {
   name = "vpc-gcp-prd"
