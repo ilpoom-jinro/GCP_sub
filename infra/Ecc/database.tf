@@ -18,8 +18,8 @@ resource "google_service_networking_connection" "private_vpc_connection" {
 
 # 2. Cloud SQL (MySQL) 인스턴스 생성
 resource "google_sql_database_instance" "dr_standby_db" {
-  name             = "dr-standby-mysql"
-  database_version = "MYSQL_8_0"
+  name             = "dr-standby-postgres"
+  database_version = "POSTGRES_14"
   region           = "asia-northeast3"
 
   # KMS 열쇠를 사용하도록 설정 (CMEK)
@@ -34,9 +34,9 @@ resource "google_sql_database_instance" "dr_standby_db" {
   settings {
     tier = "db-f1-micro" # [Cost Opt] 포트폴리오용이므로 가장 저렴한 최소 사양 사용
     
-    # 구글 IAM이 아니라, MySQL 엔진에게 직접 지시하는 설정(Flag)
+    # 구글 IAM이 아니라, PostgreSQL 엔진에게 직접 지시하는 설정(Flag)
     database_flags {
-      name  = "general_log" # 또는 MySQL 감사 플러그인 플래그
+      name  = "cloudsql.logical_decoding"
       value = "on"
     }
 
@@ -54,8 +54,7 @@ resource "google_sql_database_instance" "dr_standby_db" {
     # aws에서 복제(Replication)를 받아오기 위한 필수 세팅
     # (실제 복제 설정은 나중에 gcloud 명령어나 콘솔에서 세부적으로 잡아줘야 합니다.)
     backup_configuration {
-      enabled            = true
-      binary_log_enabled = true # 백업과 바이너리 로그가 켜져 있어야 복제가 가능합니다.
+      enabled            = true      
     }
   }
 }
