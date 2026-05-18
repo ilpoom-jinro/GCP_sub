@@ -13,7 +13,10 @@ resource "google_container_cluster" "primary" {
   name     = "gke-prd-cluster"
   location = "asia-northeast3-a"
 
-  #  CNI cilium 사용
+  # 클러스터 삭제 보호 비활성화 (개발중/테스트 환경)
+  deletion_protection = false
+
+  # CNI cilium 사용
   datapath_provider = "ADVANCED_DATAPATH"
 
   # Secondary Range 연결 (VPC-native 클러스터 설정)
@@ -27,9 +30,8 @@ resource "google_container_cluster" "primary" {
 
   network    = data.google_compute_network.vpc.id
   subnetwork = data.google_compute_subnetwork.subnet_was_gke.id
-}
 
- workload_identity_config {
+  workload_identity_config {
     workload_pool = "${var.project_number}.svc.id.goog"
   }
 }
