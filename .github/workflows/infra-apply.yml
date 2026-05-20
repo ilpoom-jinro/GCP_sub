@@ -1,17 +1,23 @@
-name: "Terraform Apply"
+name: "Terraform CI/CD Pipeline"
+
+# 1. 트리거 조건: main 브랜치로 PR이 열릴 때, 그리고 main 브랜치에 코드가 Merge(Push)될 때 작동합니다.
 on:
   push:
     branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
 
 jobs:
   terraform:
-    name: "Terraform Deploy"
+    name: "Terraform Plan & Apply"
     runs-on: ubuntu-latest
     
-    # WIF 인증을 위해 깃허브 토큰 권한을 허용해야 합니다 (필수!)
+    # 2. 권한 설정 (PR에 댓글을 달기 위해 pull-requests: write 권한이 추가되었습니다!)
     permissions:
       contents: 'read'
       id-token: 'write'
+      pull-requests: 'write' 
 
     steps:
       - name: Checkout Code
@@ -29,7 +35,53 @@ jobs:
           terraform_version: "1.5.0"
 
       - name: Terraform Init
+        id: init
         run: terraform init
 
+      # 3. [PR 전용] Terraform Plan 실행
+      # PR 이벤트일 때만 작동하며, 결과를 보기 위해 에러가 나도 다음 스텝으로 넘어갑니다(continue-on-error).
+      - name: Terraform Plan
+        id: plan
+        if: github.event_name == 'pull_request'
+        run: terraform plan -no-color
+        continue-on-error: true
+
+      # 4. [PR 전용] Plan 결과를 깃허브 PR 댓글(Comment)로 예쁘게 달아줍니다.
+      - name: Comment PR with Plan Result
+        uses: actions/github-script@v6
+        if: github.event_name == 'pull_request'
+        env:
+          PLAN: "terraform\n${{ steps.plan.outputs.stdout }}"
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const output = `#### 🏗️ Terraform Initialization ⚙️\`${{ steps.init.outcome }}\`
+            #### 📖 Terraform Plan 📝\`${{ steps.plan.outcome }}\`
+            
+            <details><summary>자세한 Plan 결과 보기 (클릭)</summary>
+            
+            \`\`\`\n
+            ${process.env.PLAN}
+            \`\`\`
+            
+            </details>
+            
+            *Pushed by: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+
+      # 5. [PR 전용] 만약 Plan 자체에 에러가 있었다면 파이프라인을 실패(빨간불)로 처리합니다.
+      - name: Check Terraform Plan Status
+        if: github.event_name == 'pull_request' && steps.plan.outcome == 'failure'
+        run: exit 1
+
+      # 6. [Merge 전용] 실제 클라우드에 배포 (Apply)
+      # 오직 main 브랜치에 코드가 완전히 Push(Merge) 되었을 때만 실행됩니다!
       - name: Terraform Apply
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: terraform apply -auto-approve
