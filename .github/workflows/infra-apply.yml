@@ -13,6 +13,10 @@ jobs:
     name: "Terraform Plan & Apply"
     runs-on: ubuntu-latest
     
+    defaults:
+      run:
+        working-directory: GCP_sub/infra/Ecc
+
     # 2. 권한 설정 (PR에 댓글을 달기 위해 pull-requests: write 권한이 추가되었습니다!)
     permissions:
       contents: 'read'
