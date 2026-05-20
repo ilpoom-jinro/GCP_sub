@@ -6,6 +6,16 @@ jobs:
   terraform-destroy:
     name: "Terraform Destroy"
     runs-on: ubuntu-latest
+
+    # 👇 [필수] Apply 파일과 완벽하게 똑같이 환경변수와 경로를 매칭해줍니다!
+    env:
+      TF_VAR_org_id: ${{ secrets.GCP_ORG_ID }}
+      TF_VAR_project_number: ${{ secrets.GCP_PROJECT_NUMBER }}
+
+    defaults:
+      run:
+        working-directory: ./infra/Ecc
+
     permissions:
       contents: 'read'
       id-token: 'write'
