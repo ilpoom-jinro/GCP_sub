@@ -13,6 +13,14 @@ jobs:
     name: "Terraform Plan & Apply"
     runs-on: ubuntu-latest
     
+    # 깃허브 Secrets에서 값을 꺼내와서, 테라폼 전용 환경변수(TF_VAR_)로 변환하여 쏴줍니다.
+    env:
+      TF_VAR_org_id: ${{ secrets.GCP_ORG_ID }}
+      TF_VAR_project_number: ${{ secrets.GCP_PROJECT_NUMBER }}
+
+    defaults:
+      run:
+        working-directory: ./infra/Ecc
     # 2. 권한 설정 (PR에 댓글을 달기 위해 pull-requests: write 권한이 추가되었습니다!)
     permissions:
       contents: 'read'
@@ -43,7 +51,7 @@ jobs:
       - name: Terraform Plan
         id: plan
         if: github.event_name == 'pull_request'
-        run: terraform plan -no-color
+        run: terraform plan -no-color -input=false
         continue-on-error: true
 
       # 4. [PR 전용] Plan 결과를 깃허브 PR 댓글(Comment)로 예쁘게 달아줍니다.
@@ -84,4 +92,4 @@ jobs:
       # 오직 main 브랜치에 코드가 완전히 Push(Merge) 되었을 때만 실행됩니다!
       - name: Terraform Apply
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: terraform apply -auto-approve
+        run: terraform apply -auto-approve -input=false
