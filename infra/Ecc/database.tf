@@ -1,5 +1,11 @@
 # database.tf
 
+# Cloud SQL Admin API 활성화
+resource "google_project_service" "sqladmin_api" {
+  service            = "sqladmin.googleapis.com"
+  disable_on_destroy = false
+}
+
 # 1. Private Services Access (Cloud SQL을 Private IP로만 띄우기 위한 사전 작업)
 # 이 작업이 없으면 Cloud SQL이 내부 IP를 할당받지 못합니다.
 resource "google_compute_global_address" "private_ip_address" {
