@@ -33,13 +33,13 @@ resource "google_compute_subnetwork" "subnet_was_gke" {
   # Secondary Range 1 (GKE Pod용)
   secondary_ip_range {
     range_name    = "gke-pod-range"
-    ip_cidr_range = "10.51.0.0/16" 
+    ip_cidr_range = "10.52.0.0/16" 
   }
 
   # Secondary Range 2 (GKE Service용)
   secondary_ip_range {
     range_name    = "gke-svc-range"
-    ip_cidr_range = "10.52.0.0/20" 
+    ip_cidr_range = "10.53.0.0/20" 
   }
 
   private_ip_google_access = true
