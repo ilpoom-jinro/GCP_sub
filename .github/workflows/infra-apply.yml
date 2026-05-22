@@ -4,8 +4,12 @@ name: "Terraform CI/CD Pipeline"
 on:
   push:
     branches: [ "main" ]
+    paths:
+      - "infra/Ecc/**"
   pull_request:
     branches: [ "main" ]
+    paths:
+      - "infra/Ecc/**"
   workflow_dispatch:
 
 jobs:
