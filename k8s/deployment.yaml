@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: php-app-deployment
+  namespace: default
+  labels:
+    app: php-app
+spec:
+  replicas: 2 # 무중단 운영 및 Spot 인스턴스 대응을 위해 2대로 기동
+  selector:
+    matchLabels:
+      app: php-app
+  template:
+    metadata:
+      labels:
+        app: php-app
+    spec:
+      # 위에서 만든 KSA를 이 앱 파드에 부여
+      serviceAccountName: app-ksa
+      containers:
+      - name: php-app-container
+        image: nginx:latest # 임시 이미지 (나중에 빌드된 앱 이미지로 교체)
+        ports:
+        - containerPort: 80
