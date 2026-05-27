@@ -54,7 +54,7 @@ jobs:
       # PR 이벤트일 때만 작동하며, 결과를 보기 위해 에러가 나도 다음 스텝으로 넘어갑니다(continue-on-error).
       - name: Terraform Plan
         id: plan
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
         run: terraform plan -no-color -input=false
         continue-on-error: true
 
@@ -67,6 +67,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
+            if (context.issue.number) {
             const output = `#### 🏗️ Terraform Initialization ⚙️\`${{ steps.init.outcome }}\`
             #### 📖 Terraform Plan 📝\`${{ steps.plan.outcome }}\`
             
@@ -85,7 +86,11 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: output
-            })
+            });
+            } else {
+              console.log("PR 이벤트가 아니므로 댓글 작성을 건너뜁니다.");
+            }
+        
 
       # 5. [PR 전용] 만약 Plan 자체에 에러가 있었다면 파이프라인을 실패(빨간불)로 처리합니다.
       - name: Check Terraform Plan Status
@@ -95,5 +100,5 @@ jobs:
       # 6. [Merge 전용] 실제 클라우드에 배포 (Apply)
       # 오직 main 브랜치에 코드가 완전히 Push(Merge) 되었을 때만 실행됩니다!
       - name: Terraform Apply
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
         run: terraform apply -auto-approve -input=false
