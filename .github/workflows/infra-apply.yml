@@ -54,14 +54,14 @@ jobs:
       # PR 이벤트일 때만 작동하며, 결과를 보기 위해 에러가 나도 다음 스텝으로 넘어갑니다(continue-on-error).
       - name: Terraform Plan
         id: plan
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
         run: terraform plan -no-color -input=false
         continue-on-error: true
 
       # 4. [PR 전용] Plan 결과를 깃허브 PR 댓글(Comment)로 예쁘게 달아줍니다.
       - name: Comment PR with Plan Result
         uses: actions/github-script@v6
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
         env:
           PLAN: "terraform\n${{ steps.plan.outputs.stdout }}"
         with:
@@ -95,5 +95,5 @@ jobs:
       # 6. [Merge 전용] 실제 클라우드에 배포 (Apply)
       # 오직 main 브랜치에 코드가 완전히 Push(Merge) 되었을 때만 실행됩니다!
       - name: Terraform Apply
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
         run: terraform apply -auto-approve -input=false
