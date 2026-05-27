@@ -1,0 +1,9 @@
+#workload_ksa.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: app-ksa        # 테라폼에 등록한 KSA 이름
+  namespace: default   # 테라폼에 등록한 네임스페이스
+  annotations:
+    # GCP의 gke-app-sa 서비스 계정을 이 계정에 연동하겠다는 뜻입니다. (테라폼에서 만든 GCP 서비스 계정 이름)
+    iam.gke.io/gcp-service-account: "gke-app-sa@ilpoomjinro.iam.gserviceaccount.com"
