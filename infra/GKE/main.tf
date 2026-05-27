@@ -32,7 +32,7 @@ resource "google_container_cluster" "primary" {
   subnetwork = data.google_compute_subnetwork.subnet_was_gke.id
 
   workload_identity_config {
-    workload_pool = "${var.project_number}.svc.id.goog"
+    workload_pool = "${var.project_id}.svc.id.goog"
   }
 
   # 프라이빗 클러스터 설정 추가
