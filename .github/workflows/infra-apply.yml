@@ -61,7 +61,7 @@ jobs:
       # 4. [PR 전용] Plan 결과를 깃허브 PR 댓글(Comment)로 예쁘게 달아줍니다.
       - name: Comment PR with Plan Result
         uses: actions/github-script@v6
-        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'pull_request'
         env:
           PLAN: "terraform\n${{ steps.plan.outputs.stdout }}"
         with:
