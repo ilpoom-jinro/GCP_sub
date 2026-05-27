@@ -1,4 +1,4 @@
 # terraform.tfvars
 org_id         = "165721308560"
-project_number = "ilpoomjinro"
-# project_number = "673985607127"
+project_number = "673985607127"
+# project_number = "ilpoomjinro"
