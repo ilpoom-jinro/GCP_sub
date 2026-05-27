@@ -67,6 +67,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
+            if (context.issue.number) {
             const output = `#### 🏗️ Terraform Initialization ⚙️\`${{ steps.init.outcome }}\`
             #### 📖 Terraform Plan 📝\`${{ steps.plan.outcome }}\`
             
@@ -85,7 +86,11 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: output
-            })
+            });
+            } else {
+              console.log("PR 이벤트가 아니므로 댓글 작성을 건너뜁니다.");
+            }
+        
 
       # 5. [PR 전용] 만약 Plan 자체에 에러가 있었다면 파이프라인을 실패(빨간불)로 처리합니다.
       - name: Check Terraform Plan Status
