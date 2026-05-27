@@ -74,7 +74,7 @@ resource "google_service_account_iam_member" "workload_identity_binding" {
   service_account_id = data.google_service_account.gke_sa.name
   role               = "roles/iam.workloadIdentityUser"
 
-  member = "serviceAccount:${var.project_number}.svc.id.goog[default/app-ksa]"
+  member = "serviceAccount:${var.project_id}.svc.id.goog[default/app-ksa]"
 
   # 클러스터 생성 후 안전하게 바인딩
   depends_on = [
