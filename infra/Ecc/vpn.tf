@@ -57,7 +57,7 @@ resource "google_compute_instance" "headscale_vpn" {
     # tailscale 실행 커맨드 추가 예정
     # --advertise-routes: GCP의 서브넷 대역을 다른 노드(AWS 등)에 알림 
     # --snat-subnet-routes=false: Tailscale 자체 SNAT를 끄고, 우리가 설정한 iptables SNAT를 사용
-    tailscale up --login-server https://headscale.ilpumjinro.cloud/ --authkey hskey-auth-xYVNSeHhfann-W4OCprF9ERsXwVs0vVhgPV-L2v3dHSKNumdyx-snaUGVbGizlEiyLFYgkVeOSxM9 --advertise-routes=10.50.0.0/16,10.51.0.0/16,10.52.0.0/20 --snat-subnet-routes=false
+    tailscale up --login-server https://headscale.ilpumjinro.cloud/ --authkey hskey-auth-E_TSfOTrO6Mc-f_7zjnNVIcsTyRf1ts6NRV3VwJm5r2nnH8f-KmwH6w_U7x6Sj8WmDeAqjl5NfK-x --advertise-routes=10.50.0.0/16,10.51.0.0/16,10.52.0.0/20 --snat-subnet-routes=false
 
   EOF
 }
