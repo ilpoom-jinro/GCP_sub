@@ -31,6 +31,29 @@ resource "helm_release" "istiod" {
 }
 
 # 4. Istio CNI 설치 (중요: GKE 환경 맞춤형 경로 설정)
+# Istio CNI 파드가 노드에서 강제 종료되지 않도록 최고 우선순위 사용을 허용
+resource "kubernetes_resource_quota_v1" "istio_critical_pods" {
+  metadata {
+    name      = "gcp-critical-classes"
+    namespace = "istio-system"
+  }
+  spec {
+    hard = {
+      pods = "100"
+    }
+    scope_selector {
+      match_expression {
+        operator   = "In"
+        scope_name = "PriorityClass"
+        values     = ["system-node-critical", "system-cluster-critical"]
+      }
+    }
+  }
+  
+  # istio-system 네임스페이스가 생성된 이후에 Quota를 추가해야 하므로 의존성 설정
+  depends_on = [helm_release.istio_base]
+}
+
 resource "helm_release" "istio_cni" {
   name       = "istio-cni"
   repository = "https://istio-release.storage.googleapis.com/charts"
@@ -41,16 +64,17 @@ resource "helm_release" "istio_cni" {
     name  = "profile"
     value = "ambient"
   }
+  
   set {
     name  = "cni.cniBinDir"
     value = "/home/kubernetes/bin"
   }
-  #  GKE 보안 정책 충돌을 피하기 위해 VIP 패스 제거
-  set {
-    name  = "priorityClassName"
-    value = ""
-  }
-  depends_on = [helm_release.istiod]
+
+  # istiod뿐만 아니라 Quota 리소스가 생성된 이후에 CNI가 배포되도록 수정
+    depends_on = [
+    helm_release.istiod,
+    kubernetes_resource_quota_v1.istio_critical_pods
+  ]
 }
 
 # 5. Ztunnel 설치 (노드마다 생성되는 초경량 보안 프록시 터널)
