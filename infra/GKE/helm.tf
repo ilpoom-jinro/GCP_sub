@@ -43,7 +43,12 @@ resource "helm_release" "istio_cni" {
   }
   set {
     name  = "cni.cniBinDir"
-    value = "/home/kubernetes/bin" # GKE에서 Ambient Mesh를 돌리기 위한 필수 경로
+    value = "/home/kubernetes/bin"
+  }
+  #  GKE 보안 정책 충돌을 피하기 위해 VIP 패스 제거
+  set {
+    name  = "priorityClassName"
+    value = ""
   }
   depends_on = [helm_release.istiod]
 }

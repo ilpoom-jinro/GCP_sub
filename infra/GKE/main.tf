@@ -55,7 +55,7 @@ resource "google_container_node_pool" "spot_nodes" {
 
   node_config {
     spot         = true
-    machine_type = "e2-medium"
+    machine_type = "e2-standard-2"
 
     oauth_scopes = [
       "https://www.googleapis.com/auth/cloud-platform"
