@@ -35,7 +35,7 @@ env:
   GCP_PROJECT_ID: "ilpoomjinro"
   GCP_REGION: "asia-northeast3"
   KMS_KEYRING_NAME: "ilpoomjinro-db-keyring-v6"
-  KMS_CRYPTOKEY_NAME: "sql-disk-encryption-key-v6"
+  KMS_CRYPTOKEY_NAME: "sql-disk-encryption-key-v7"
   CLOUDSQL_INSTANCE_NAME: "dr-standby-postgres"
   CLOUDSQL_DATABASE_NAME: "ilpoomjinro_db"
   CLOUDSQL_USER_NAME: "admin"

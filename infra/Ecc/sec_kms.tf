@@ -8,7 +8,7 @@ resource "google_kms_key_ring" "db_keyring" {
 
 # 2. CryptoKey (실제 열쇠) 생성
 resource "google_kms_crypto_key" "sql_disk_key" {
-  name            = "sql-disk-encryption-key-v8"
+  name            = "sql-disk-encryption-key-v7"
   key_ring        = google_kms_key_ring.db_keyring.id
   rotation_period = "7776000s" # 90일마다 자동으로 열쇠를 교체(Rotation)하도록 설정 (보안 정석)
 
