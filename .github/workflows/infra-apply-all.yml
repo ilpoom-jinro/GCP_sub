@@ -1,0 +1,120 @@
+name: "Terraform Apply All"
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply_ecc:
+        description: "Apply infra/Ecc base infrastructure"
+        required: true
+        default: true
+        type: boolean
+      apply_gke:
+        description: "Apply infra/GKE cluster and add-ons"
+        required: true
+        default: true
+        type: boolean
+  push:
+    branches: ["main"]
+    paths:
+      - "infra/Ecc/**"
+      - "infra/GKE/**"
+      - ".github/workflows/infra-apply-all.yml"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: gcp-terraform-apply-all
+  cancel-in-progress: false
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  TERRAFORM_VERSION: "1.5.7"
+  GCP_PROJECT_ID: "ilpoomjinro"
+  GCP_REGION: "asia-northeast3"
+  GKE_CLUSTER_NAME: "gke-prd-cluster"
+  GKE_CLUSTER_ZONE: "asia-northeast3-a"
+
+jobs:
+  apply-ecc:
+    name: "Apply infra/Ecc"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || inputs.apply_ecc
+    defaults:
+      run:
+        working-directory: infra/Ecc
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.TF_SA_EMAIL }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Terraform Init
+        run: terraform init -input=false
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve -input=false
+
+  apply-gke:
+    name: "Apply infra/GKE"
+    runs-on: ubuntu-latest
+    needs: apply-ecc
+    if: always() && (github.event_name == 'push' || inputs.apply_gke) && (needs.apply-ecc.result == 'success' || needs.apply-ecc.result == 'skipped')
+    defaults:
+      run:
+        working-directory: infra/GKE
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.TF_SA_EMAIL }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          install_components: gke-gcloud-auth-plugin
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Terraform Init
+        run: terraform init -input=false
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Apply GKE cluster first
+        run: |
+          terraform apply -auto-approve -input=false \
+            -target=google_container_cluster.primary \
+            -target=google_container_node_pool.spot_nodes \
+            -target=google_service_account_iam_member.workload_identity_binding
+
+      - name: Configure kubectl
+        run: |
+          gcloud container clusters get-credentials "$GKE_CLUSTER_NAME" \
+            --zone "$GKE_CLUSTER_ZONE" \
+            --project "$GCP_PROJECT_ID"
+
+      - name: Terraform Apply GKE add-ons
+        run: terraform apply -auto-approve -input=false
