@@ -22,11 +22,11 @@ resource "google_service_networking_connection" "private_vpc_connection" {
   reserved_peering_ranges = [google_compute_global_address.private_ip_address.name]
 }
 
-# 2. Cloud SQL (MySQL) 인스턴스 생성
+# 2. Cloud SQL (PostgreSQL) 인스턴스 생성
 resource "google_sql_database_instance" "dr_standby_db" {
   name             = "dr-standby-postgres"
-  database_version = "POSTGRES_14"
-  region           = "asia-northeast3"
+  database_version = "POSTGRES_16"
+  region           = var.region
 
   # KMS 열쇠를 사용하도록 설정 (CMEK)
   encryption_key_name = google_kms_crypto_key.sql_disk_key.id
@@ -39,7 +39,7 @@ resource "google_sql_database_instance" "dr_standby_db" {
 
   settings {
     tier = "db-f1-micro" # [Cost Opt] 포트폴리오용이므로 가장 저렴한 최소 사양 사용
-    
+
     # 구글 IAM이 아니라, PostgreSQL 엔진에게 직접 지시하는 설정(Flag)
     database_flags {
       name  = "cloudsql.logical_decoding"
@@ -52,7 +52,7 @@ resource "google_sql_database_instance" "dr_standby_db" {
     ip_configuration {
       ipv4_enabled    = false # [Security] 공인 IP 절대 부여 금지!
       private_network = google_compute_network.vpc_gcp_prd.id
-      
+
       # 방화벽 없이 Cloud SQL에 붙을 수 있도록 IAP 설정 가능성 열어두기
       enable_private_path_for_google_cloud_services = true
     }
@@ -60,14 +60,14 @@ resource "google_sql_database_instance" "dr_standby_db" {
     # aws에서 복제(Replication)를 받아오기 위한 필수 세팅
     # (실제 복제 설정은 나중에 gcloud 명령어나 콘솔에서 세부적으로 잡아줘야 합니다.)
     backup_configuration {
-      enabled            = true      
+      enabled = true
     }
   }
 }
 
-# 3. 데이터베이스 생성
-resource "google_sql_database" "main_db" {
-  name     = "ilpoomjinro_db"
+# 3. AWS service DB와 이름을 맞춘 동기화 대상 DB 생성
+resource "google_sql_database" "financial_service_db" {
+  name     = var.dms_source_database
   instance = google_sql_database_instance.dr_standby_db.name
 }
 

@@ -10,7 +10,7 @@ resource "random_password" "db_password" {
 # 2. Secret Manager에 비밀번호 저장소 만들기
 resource "google_secret_manager_secret" "db_secret" {
   secret_id = "ilpoomjinro-db-password"
-  
+
   replication {
     auto {} # 구글이 알아서 가장 안전한 리전에 분산 복제하도록 맡깁니다.
   }
@@ -43,7 +43,7 @@ resource "google_secret_manager_secret_iam_member" "gke_sa_secret_access" {
 # resource "google_service_account_iam_member" "workload_identity_binding" {
 #   service_account_id = google_service_account.gke_sa.name
 #   role               = "roles/iam.workloadIdentityUser"
-  
+
 #   # 구글이 정해둔 Workload Identity 멤버 형식 (외우지 말고 복붙하세요!)
 #   # 형식: serviceAccount:[프로젝트ID].svc.id.goog[[K8s네임스페이스]/[K8s서비스계정명]]
 #   member = "serviceAccount:${var.project_number}.svc.id.goog[default/app-ksa]"

@@ -14,10 +14,10 @@ resource "google_compute_instance" "headscale_vpn" {
   network_interface {
     network    = google_compute_network.vpc_gcp_prd.id
     subnetwork = google_compute_subnetwork.subnet_sec.id
-    
+
     # Public IP 부여
     access_config {
-      nat_ip         = google_compute_address.vpn_static_ip.address
+      nat_ip       = google_compute_address.vpn_static_ip.address
       network_tier = "PREMIUM"
     }
   }
@@ -33,7 +33,7 @@ resource "google_compute_instance" "headscale_vpn" {
   tags = ["allow-iap-ssh", "headscale-router"]
 
   # IP 포워딩 활성화 (VPN 라우터 역할을 하기 위해 필수 설정)
-  can_ip_forward = true 
+  can_ip_forward = true
 
   # VM이 켜질 때 자동으로 실행되는 스크립트
   metadata_startup_script = <<-EOF
@@ -67,12 +67,12 @@ resource "google_compute_route" "route_to_aws" {
   for_each = toset(["10.10.0.0/16", "10.20.0.0/16", "10.30.0.0/16", "10.40.0.0/16"])
 
   # route-to-aws-10-10, route-to-aws-10-20 식으로 이름이 자동 생성됨
-  name        = "route-to-aws-${replace(each.value, "/[./]/", "-")}"
-  dest_range  = each.value
-  network     = google_compute_network.vpc_gcp_prd.name
-  
-  next_hop_instance = google_compute_instance.headscale_vpn.id
+  name       = "route-to-aws-${replace(each.value, "/[./]/", "-")}"
+  dest_range = each.value
+  network    = google_compute_network.vpc_gcp_prd.name
+
+  next_hop_instance      = google_compute_instance.headscale_vpn.id
   next_hop_instance_zone = google_compute_instance.headscale_vpn.zone
-  
-  priority    = 1000
+
+  priority = 1000
 }

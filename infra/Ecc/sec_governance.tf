@@ -2,15 +2,15 @@
 
 # 1. Cloud Asset Inventory API 활성화
 resource "google_project_service" "asset_inventory_api" {
-  project = var.project_number
-  service = "cloudasset.googleapis.com"
+  project            = var.project_number
+  service            = "cloudasset.googleapis.com"
   disable_on_destroy = false
 }
 
 # 2. Security Command Center API 활성화
 resource "google_project_service" "scc_api" {
-  project = var.project_number
-  service = "securitycenter.googleapis.com"
+  project            = var.project_number
+  service            = "securitycenter.googleapis.com"
   disable_on_destroy = false
 }
 
@@ -24,7 +24,7 @@ resource "google_project_iam_audit_config" "secret_manager_audit" {
   audit_log_config {
     log_type = "DATA_READ"
   }
-  
+
   # 누군가 데이터를 쓰거나 수정했을 때 기록
   audit_log_config {
     log_type = "DATA_WRITE"
