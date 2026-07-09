@@ -34,6 +34,8 @@ env:
   TERRAFORM_VERSION: "1.5.7"
   GCP_PROJECT_ID: "ilpoomjinro"
   GCP_REGION: "asia-northeast3"
+  KMS_KEYRING_NAME: "ilpoomjinro-db-keyring-v6"
+  KMS_CRYPTOKEY_NAME: "sql-disk-encryption-key-v6"
   GKE_CLUSTER_NAME: "gke-prd-cluster"
   GKE_CLUSTER_ZONE: "asia-northeast3-a"
 
@@ -62,6 +64,19 @@ jobs:
 
       - name: Terraform Init
         run: terraform init -input=false
+
+      - name: Import existing KMS resources
+        run: |
+          KEY_RING_ID="projects/${GCP_PROJECT_ID}/locations/${GCP_REGION}/keyRings/${KMS_KEYRING_NAME}"
+          CRYPTO_KEY_ID="${KEY_RING_ID}/cryptoKeys/${KMS_CRYPTOKEY_NAME}"
+
+          terraform state show google_kms_key_ring.db_keyring >/dev/null 2>&1 || \
+            terraform import -input=false google_kms_key_ring.db_keyring "${KEY_RING_ID}" || \
+            echo "KeyRing is not in state and was not importable. Terraform apply will create it if needed."
+
+          terraform state show google_kms_crypto_key.sql_disk_key >/dev/null 2>&1 || \
+            terraform import -input=false google_kms_crypto_key.sql_disk_key "${CRYPTO_KEY_ID}" || \
+            echo "CryptoKey is not in state and was not importable. Terraform apply will create it if needed."
 
       - name: Terraform Validate
         run: terraform validate

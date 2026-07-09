@@ -21,6 +21,10 @@ jobs:
     env:
       TF_VAR_org_id: ${{ secrets.GCP_ORG_ID }}
       TF_VAR_project_number: ${{ secrets.GCP_PROJECT_NUMBER }}
+      GCP_PROJECT_ID: "ilpoomjinro"
+      GCP_REGION: "asia-northeast3"
+      KMS_KEYRING_NAME: "ilpoomjinro-db-keyring-v6"
+      KMS_CRYPTOKEY_NAME: "sql-disk-encryption-key-v6"
 
     defaults:
       run:
@@ -49,6 +53,19 @@ jobs:
       - name: Terraform Init
         id: init
         run: terraform init
+
+      - name: Import existing KMS resources
+        run: |
+          KEY_RING_ID="projects/${GCP_PROJECT_ID}/locations/${GCP_REGION}/keyRings/${KMS_KEYRING_NAME}"
+          CRYPTO_KEY_ID="${KEY_RING_ID}/cryptoKeys/${KMS_CRYPTOKEY_NAME}"
+
+          terraform state show google_kms_key_ring.db_keyring >/dev/null 2>&1 || \
+            terraform import -input=false google_kms_key_ring.db_keyring "${KEY_RING_ID}" || \
+            echo "KeyRing is not in state and was not importable. Terraform apply will create it if needed."
+
+          terraform state show google_kms_crypto_key.sql_disk_key >/dev/null 2>&1 || \
+            terraform import -input=false google_kms_crypto_key.sql_disk_key "${CRYPTO_KEY_ID}" || \
+            echo "CryptoKey is not in state and was not importable. Terraform apply will create it if needed."
 
       # 3. [PR 전용] Terraform Plan 실행
       # PR 이벤트일 때만 작동하며, 결과를 보기 위해 에러가 나도 다음 스텝으로 넘어갑니다(continue-on-error).
