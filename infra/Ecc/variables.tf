@@ -21,6 +21,12 @@ variable "region" {
   default     = "asia-northeast3"
 }
 
+variable "tailscale_auth_key" {
+  description = "Headscale preauth key used to register the GCP subnet router"
+  type        = string
+  sensitive   = true
+}
+
 variable "enable_dms" {
   description = "AWS PostgreSQL -> Cloud SQL DMS resources creation toggle"
   type        = bool

@@ -22,6 +22,15 @@ resource "google_service_networking_connection" "private_vpc_connection" {
   reserved_peering_ranges = [google_compute_global_address.private_ip_address.name]
 }
 
+# DMS 서비스 대역이 VPC의 AWS 정적 경로를 사용할 수 있도록 전달합니다.
+resource "google_compute_network_peering_routes_config" "service_networking" {
+  network = google_compute_network.vpc_gcp_prd.name
+  peering = google_service_networking_connection.private_vpc_connection.peering
+
+  import_custom_routes = false
+  export_custom_routes = true
+}
+
 # 2. Cloud SQL (PostgreSQL) 인스턴스 생성
 resource "google_sql_database_instance" "dr_standby_db" {
   name             = "dr-standby-postgres"

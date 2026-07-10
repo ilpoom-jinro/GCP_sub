@@ -52,6 +52,8 @@ jobs:
     name: "Apply infra/Ecc"
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || inputs.apply_ecc
+    env:
+      TF_VAR_tailscale_auth_key: ${{ secrets.TAILSCALE_AUTH_KEY }}
     defaults:
       run:
         working-directory: infra/Ecc
