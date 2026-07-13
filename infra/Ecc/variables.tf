@@ -27,6 +27,12 @@ variable "tailscale_auth_key" {
   sensitive   = true
 }
 
+variable "aws_headscale_router_eip" {
+  description = "AWS Headscale subnet router Elastic IP in CIDR notation"
+  type        = string
+  default     = "3.37.183.38/32"
+}
+
 variable "enable_dms" {
   description = "AWS PostgreSQL -> Cloud SQL DMS resources creation toggle"
   type        = bool

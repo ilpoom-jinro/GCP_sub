@@ -73,17 +73,3 @@ resource "google_sql_database_instance" "dr_standby_db" {
     }
   }
 }
-
-# 3. AWS service DB와 이름을 맞춘 동기화 대상 DB 생성
-resource "google_sql_database" "financial_service_db" {
-  name     = var.dms_source_database
-  instance = google_sql_database_instance.dr_standby_db.name
-}
-
-# 4. DB 유저 생성
-resource "google_sql_user" "db_user" {
-  name     = "admin"
-  instance = google_sql_database_instance.dr_standby_db.name
-  # security.tf에서 생성한 랜덤 패스워드를 동적으로 끌어옵니다.
-  password = random_password.db_password.result
-}

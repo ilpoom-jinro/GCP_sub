@@ -37,8 +37,6 @@ env:
   KMS_KEYRING_NAME: "ilpoomjinro-db-keyring-v6"
   KMS_CRYPTOKEY_NAME: "sql-disk-encryption-key-v7"
   CLOUDSQL_INSTANCE_NAME: "dr-standby-postgres"
-  CLOUDSQL_DATABASE_NAME: "financial_service"
-  CLOUDSQL_USER_NAME: "admin"
   TF_VAR_enable_dms: ${{ vars.ENABLE_DMS || 'false' }}
   TF_VAR_dms_source_host: ${{ vars.DMS_SOURCE_HOST || '' }}
   TF_VAR_dms_source_username: ${{ vars.DMS_SOURCE_USERNAME || 'gcp_dms_user' }}
@@ -91,20 +89,10 @@ jobs:
       - name: Import existing Cloud SQL resources
         run: |
           INSTANCE_ID="projects/${GCP_PROJECT_ID}/instances/${CLOUDSQL_INSTANCE_NAME}"
-          DATABASE_ID="projects/${GCP_PROJECT_ID}/instances/${CLOUDSQL_INSTANCE_NAME}/databases/${CLOUDSQL_DATABASE_NAME}"
-          USER_ID="${GCP_PROJECT_ID}/${CLOUDSQL_INSTANCE_NAME}/${CLOUDSQL_USER_NAME}"
 
           terraform state show google_sql_database_instance.dr_standby_db >/dev/null 2>&1 || \
             terraform import -input=false google_sql_database_instance.dr_standby_db "${INSTANCE_ID}" || \
             echo "Cloud SQL instance is not in state and was not importable. Terraform apply will create it if needed."
-
-          terraform state show google_sql_database.financial_service_db >/dev/null 2>&1 || \
-            terraform import -input=false google_sql_database.financial_service_db "${DATABASE_ID}" || \
-            echo "Cloud SQL database is not in state and was not importable. Terraform apply will create it if needed."
-
-          terraform state show google_sql_user.db_user >/dev/null 2>&1 || \
-            terraform import -input=false google_sql_user.db_user "${USER_ID}" || \
-            echo "Cloud SQL user is not in state and was not importable. Terraform apply will create it if needed."
 
       - name: Terraform Validate
         run: terraform validate

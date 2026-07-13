@@ -42,12 +42,12 @@ resource "google_compute_firewall" "allow_tailscale" {
   name    = "allow-tailscale-udp"
   network = google_compute_network.vpc_gcp_prd.name
 
-  # 전 세계(0.0.0.0/0)를 대상으로 열거나, AWS/오라클 IP만 특정하여 허용, 오라클 IP는 나중에 추가 예정
-  source_ranges = ["10.40.0.0/16"]
+  # AWS subnet router의 고정 공인 IP에서만 Tailscale UDP를 허용합니다.
+  source_ranges = [var.aws_headscale_router_eip]
 
   allow {
     protocol = "udp"
-    ports    = ["41641", "51820"] # 41641은 tailscale, 51820은 wireguard 기본 포트.
+    ports    = ["41641"]
   }
 
   target_tags = ["headscale-router"] # VPN VM에 이 태그를 추가하세요.
