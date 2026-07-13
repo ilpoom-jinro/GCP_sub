@@ -1,0 +1,101 @@
+name: Ensure GKE DR TLS Certificate
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 1 * *"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: gke-dr-tls
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: ilpoomjinro
+  GKE_CLUSTER_NAME: gke-prd-cluster
+  GKE_CLUSTER_ZONE: asia-northeast3-a
+  CERTIFICATE_SECRET: gcp-dr-tls
+  CERTIFICATE_NAME: ilpumjinro.store
+
+jobs:
+  ensure-tls:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.TF_SA_EMAIL }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          install_components: gke-gcloud-auth-plugin
+
+      - name: Configure kubectl
+        run: |
+          gcloud container clusters get-credentials "${GKE_CLUSTER_NAME}" \
+            --zone "${GKE_CLUSTER_ZONE}" \
+            --project "${GCP_PROJECT_ID}"
+
+      - name: Check the current certificate lifetime
+        id: certificate
+        run: |
+          set -euo pipefail
+
+          if ! kubectl -n stock-demo get secret "${CERTIFICATE_SECRET}" >/dev/null 2>&1; then
+            echo "renew=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          kubectl -n stock-demo get secret "${CERTIFICATE_SECRET}" \
+            -o jsonpath='{.data.tls\\.crt}' | base64 --decode >/tmp/gcp-dr-tls.crt
+
+          if openssl x509 -checkend 2592000 -noout -in /tmp/gcp-dr-tls.crt; then
+            echo "renew=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "renew=true" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Authenticate to AWS for DNS validation
+        if: steps.certificate.outputs.renew == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DR_CERTIFICATE_ROLE_ARN }}
+          aws-region: ap-northeast-2
+
+      - name: Issue or renew the Let's Encrypt certificate
+        if: steps.certificate.outputs.renew == 'true'
+        env:
+          LETSENCRYPT_EMAIL: ${{ secrets.LETSENCRYPT_EMAIL }}
+        run: |
+          set -euo pipefail
+          : "${LETSENCRYPT_EMAIL:?Set repository secret LETSENCRYPT_EMAIL first.}"
+
+          sudo apt-get update
+          sudo apt-get install -y certbot python3-certbot-dns-route53
+          certbot certonly \
+            --dns-route53 \
+            --dns-route53-propagation-seconds 30 \
+            --non-interactive \
+            --agree-tos \
+            --email "${LETSENCRYPT_EMAIL}" \
+            --cert-name "${CERTIFICATE_NAME}" \
+            -d ilpumjinro.store \
+            -d gcp.ilpumjinro.store
+
+          kubectl -n stock-demo create secret tls "${CERTIFICATE_SECRET}" \
+            --cert "/etc/letsencrypt/live/${CERTIFICATE_NAME}/fullchain.pem" \
+            --key "/etc/letsencrypt/live/${CERTIFICATE_NAME}/privkey.pem" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Show certificate expiry
+        run: |
+          kubectl -n stock-demo get secret "${CERTIFICATE_SECRET}" \
+            -o jsonpath='{.data.tls\\.crt}' | base64 --decode | openssl x509 -noout -subject -enddate

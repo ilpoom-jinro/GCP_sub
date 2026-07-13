@@ -78,6 +78,28 @@ jobs:
             --zone "${GKE_CLUSTER_ZONE}" \
             --project "${GCP_PROJECT_ID}"
 
+      - name: Configure the static Gateway address
+        id: gateway_ip
+        run: |
+          set -euo pipefail
+
+          gateway_ip="$(gcloud compute addresses describe gke-dr-gateway-ip \
+            --region "${GCP_REGION}" \
+            --project "${GCP_PROJECT_ID}" \
+            --format='value(address)')"
+          test -n "${gateway_ip}"
+          echo "address=${gateway_ip}" >> "${GITHUB_OUTPUT}"
+
+          cat >/tmp/stock-gw-service.yaml <<EOF
+          spec:
+            type: LoadBalancer
+            loadBalancerIP: ${gateway_ip}
+          EOF
+
+          kubectl -n stock-demo create configmap stock-gw-options \
+            --from-file=service=/tmp/stock-gw-service.yaml \
+            --dry-run=client -o yaml | kubectl apply -f -
+
       - name: Apply Cloud SQL credentials and DR workload
         env:
           DR_DB_HOST: ${{ vars.GCP_DR_DB_HOST }}
@@ -103,12 +125,27 @@ jobs:
           kubectl apply -k .
 
       - name: Wait for GKE DR workload
+        env:
+          GATEWAY_STATIC_IP: ${{ steps.gateway_ip.outputs.address }}
         run: |
+          set -euo pipefail
           kubectl -n stock-demo rollout status deployment/stock-api --timeout=5m
           kubectl -n stock-demo rollout status deployment/stock-web --timeout=5m
           kubectl -n stock-demo get hpa -o wide
           kubectl -n stock-demo get gateway stock-gw -o yaml
-          kubectl -n stock-demo get service -l gateway.networking.k8s.io/gateway-name=stock-gw -o wide || true
+
+          for attempt in $(seq 1 30); do
+            gateway_ip="$(kubectl -n stock-demo get service stock-gw-istio \
+              -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)"
+            if [ "${gateway_ip}" = "${GATEWAY_STATIC_IP}" ]; then
+              echo "GKE DR Gateway is using static IP ${gateway_ip}."
+              break
+            fi
+            sleep 10
+          done
+
+          test "${gateway_ip}" = "${GATEWAY_STATIC_IP}"
+          kubectl -n stock-demo get service stock-gw-istio -o wide
 
       - name: Verify the application reads Cloud SQL
         run: |
