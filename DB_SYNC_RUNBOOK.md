@@ -23,15 +23,37 @@
 
 3. DMS 전용 계정 생성
 
-   AWS RDS `financial_service` DB에 마스터 계정으로 접속한 뒤 실행합니다.
+   Amazon RDS PostgreSQL source에는 `pglogical` extension과 해당 extension을 preload하는
+   parameter group 설정이 필요합니다. `rds.logical_replication=1`,
+   `shared_preload_libraries=pglogical`, `wal_sender_timeout=0`을 적용한 뒤 RDS를
+   재부팅합니다.
+
+   DMS는 RDS source 인스턴스의 시스템 DB를 제외한 모든 DB를 확인합니다. 따라서
+   `financial_service`와 기본 `postgres` DB에 마스터 계정으로 접속해 필요한 extension과
+   권한을 부여합니다. 비밀번호는 GitHub Secret `DMS_SOURCE_PASSWORD`와 동일하게 설정합니다.
+
+   먼저 어느 DB에서든 한 번만 실행합니다.
 
    ```sql
    CREATE USER gcp_dms_user WITH PASSWORD '<DMS_SOURCE_PASSWORD>';
    GRANT rds_replication TO gcp_dms_user;
    GRANT CONNECT ON DATABASE financial_service TO gcp_dms_user;
+   GRANT CONNECT ON DATABASE postgres TO gcp_dms_user;
+   ```
+
+   이어서 `financial_service`와 `postgres`에 각각 접속해 실행합니다. 기본 `postgres`
+   데이터베이스에 `public` 외 사용자 schema가 없다면 해당 schema 권한은 생략할 수 있습니다.
+
+   ```sql
+   -- financial_service와 postgres에서 각각 실행
+   CREATE EXTENSION IF NOT EXISTS pglogical;
    GRANT USAGE ON SCHEMA public TO gcp_dms_user;
+   GRANT USAGE ON SCHEMA pglogical TO PUBLIC;
+   GRANT SELECT ON ALL TABLES IN SCHEMA pglogical TO gcp_dms_user;
    GRANT SELECT ON ALL TABLES IN SCHEMA public TO gcp_dms_user;
-   ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO gcp_dms_user;
+   GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO gcp_dms_user;
+   ALTER DEFAULT PRIVILEGES FOR ROLE financial_admin IN SCHEMA public GRANT SELECT ON TABLES TO gcp_dms_user;
+   ALTER DEFAULT PRIVILEGES FOR ROLE financial_admin IN SCHEMA public GRANT SELECT ON SEQUENCES TO gcp_dms_user;
    ```
 
 4. GitHub Actions 변수/시크릿 설정
@@ -47,7 +69,7 @@
 
 6. DMS 작업 생성 및 시작
 
-   `gcloud database-migration` 또는 DMS Console에서 기존 Cloud SQL 목적지 profile을 생성하고, `financial_service`만 선택한 continuous migration job을 만듭니다. 목적지 demote와 job test가 통과한 뒤에만 job을 시작합니다.
+   `gcloud database-migration` 또는 DMS Console에서 기존 Cloud SQL 목적지 profile과 continuous migration job을 생성합니다. 목적지 demote와 job test가 통과한 뒤에만 job을 시작합니다.
 
 ## 주의사항
 
