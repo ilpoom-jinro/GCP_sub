@@ -196,13 +196,11 @@ gcloud database-migration migration-jobs start aws-rds-to-cloudsql-dr \
 
 1. 복구된 AWS RDS를 애플리케이션 트래픽에서 분리한다. 이 시점에는 AWS에 쓰기를 절대 허용하지 않는다.
 2. AWS RDS를 GCP 원본과 동일한 schema와 데이터 상태로 재초기화한다. 장애 전의 오래된 데이터를 그대로 둔 RDS에 양방향 복제를 연결하면 안 된다.
-3. GitHub repository variable `ENABLE_FAILBACK_PUBLISHER`를 `true`로 설정하고 `infra/Ecc` apply를 실행한다.
-   - Cloud SQL에 `cloudsql.enable_pglogical=on`을 추가한다.
-   - 이 변경은 Cloud SQL 재시작을 유발하므로 GCP가 primary인 유지보수 창에서 수행한다.
+3. Cloud SQL의 `cloudsql.logical_decoding=on` 설정을 확인한다. 현재 Terraform으로 이미 관리 중이며, native PostgreSQL 논리 복제에는 `pglogical` 플래그가 필요하지 않다.
 4. OCI Headscale에 Cloud SQL Private Services Access 대역 `10.177.232.0/24`을 GCP 서브넷 라우터의 advertised route로 승인한다.
 5. Headscale ACL에 AWS 라우터에서 GCP PSA 대역의 PostgreSQL 포트로 가는 규칙을 추가한다.
 6. AWS Headscale Router에 TCP proxy를 구성한다. AWS RDS의 PostgreSQL subscription은 VPC4 Router의 사설 IP와 proxy 포트로 접속하고, proxy가 Tailscale을 거쳐 Cloud SQL `5432`으로 전달한다.
-7. Cloud SQL에서 publication을 만들고, AWS RDS에서 subscription을 만든다. RDS가 구독자로 GCP의 변경을 수신하도록 구성한다.
+7. Cloud SQL에서 native publication을 만들고, AWS RDS에서 native subscription을 만든다. RDS가 구독자로 GCP의 변경을 수신하도록 구성한다.
 8. Cloud SQL publisher와 AWS RDS subscriber의 복제 지연이 0인지 확인한다.
 9. GCP 애플리케이션 쓰기를 중지하고 AWS subscription을 비활성화한다.
 10. 애플리케이션 DB 연결을 AWS RDS로 전환한다.
@@ -210,7 +208,6 @@ gcloud database-migration migration-jobs start aws-rds-to-cloudsql-dr \
 
 ### 금지 사항
 
-- 현재 AWS -> GCP DMS가 `RUNNING` 또는 `CDC` 상태일 때 `ENABLE_FAILBACK_PUBLISHER`를 켜지 않는다.
 - Cloud SQL을 promote하기 전 GCP에 쓰기 트래픽을 보내지 않는다.
 - GCP와 AWS에 동시에 쓰기를 허용하지 않는다.
 - DMS가 완료된 뒤 기존 migration job을 역방향으로 재사용하려 하지 않는다.
@@ -226,3 +223,24 @@ gcloud database-migration migration-jobs start aws-rds-to-cloudsql-dr \
   - AWS 라우터 NAT 규칙과 기본 NIC
 - `DMS_SOURCE_PASSWORD`는 Terraform state와 GitHub Secrets에 노출될 수 있는 민감 정보다. 비밀번호를 회전하면 RDS 계정과 GitHub Secret, DMS source profile을 함께 갱신한다.
 - 실제 장애 조치 전까지 GCP는 standby/read-only로 취급한다. 애플리케이션 트래픽 전환, 쓰기 재개, 원복 절차는 별도의 failover runbook으로 관리한다.
+
+## 자동화 스크립트
+
+`scripts/dr`에는 장애 조치에 필요한 상태 조회와 승인 절차를 스크립트로 정리했다.
+
+```bash
+scripts/dr/status.sh
+scripts/dr/failover-to-gcp.sh
+```
+
+`failover-to-gcp.sh`는 기본적으로 사전 점검만 한다. 실제 promote는 AWS의 애플리케이션과 RDS 쓰기 차단을 완료한 뒤 아래처럼 명시적으로 실행한다.
+
+```bash
+scripts/dr/failover-to-gcp.sh --execute --aws-writes-fenced
+```
+
+AWS 복귀는 복구된 RDS를 초기화하고 역방향 네트워크 경로와 native logical replication을 구성해야 한다. 현재는 다음 스크립트가 해당 선행 조건만 확인한다.
+
+```bash
+scripts/dr/failback-preflight.sh
+```

@@ -75,9 +75,3 @@ variable "dms_desired_state" {
   type        = string
   default     = "NOT_STARTED"
 }
-
-variable "enable_failback_publisher" {
-  description = "Enable Cloud SQL pglogical publisher settings only after promoting GCP during an AWS outage. This change restarts Cloud SQL."
-  type        = bool
-  default     = false
-}

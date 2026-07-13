@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stock-api
+  namespace: stock-demo
+  labels:
+    app: stock-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: stock-api
+  template:
+    metadata:
+      labels:
+        app: stock-api
+    spec:
+      containers:
+        - name: stock-api
+          image: stock-api-image:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: stock-api-db
+                  key: DB_HOST
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_NAME
+              value: financial_service
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: stock-api-db
+                  key: DB_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: stock-api-db
+                  key: DB_PASSWORD
+            - name: CORS_ORIGINS
+              value: "https://ilpumjinro.store,https://gcp.ilpumjinro.store"
+            - name: OTEL_TRACING_ENABLED
+              value: "false"
+            - name: OTEL_SERVICE_NAME
+              value: stock-demo-api
+            - name: DEPLOYMENT_ENVIRONMENT
+              value: gke-dr
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: stock-demo
+spec:
+  type: ClusterIP
+  selector:
+    app: stock-api
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

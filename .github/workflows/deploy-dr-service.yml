@@ -1,0 +1,129 @@
+name: Deploy GKE DR Service
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "AWS ECR image tag to mirror and deploy"
+        required: true
+        default: "latest"
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: gke-dr-service-deploy
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: ilpoomjinro
+  GCP_REGION: asia-northeast3
+  GKE_CLUSTER_NAME: gke-prd-cluster
+  GKE_CLUSTER_ZONE: asia-northeast3-a
+  ARTIFACT_REPOSITORY: dr-app
+  AWS_REGION: ${{ secrets.AWS_REGION || 'ap-northeast-2' }}
+
+jobs:
+  mirror-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DR_IMAGE_MIRROR_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Authenticate to GCP
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.TF_SA_EMAIL }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          install_components: gke-gcloud-auth-plugin
+
+      - name: Mirror application images to Artifact Registry
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          set -euo pipefail
+
+          AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+          AWS_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+          GCP_REGISTRY="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT_ID}/${ARTIFACT_REPOSITORY}"
+
+          aws ecr get-login-password --region "${AWS_REGION}" | \
+            docker login --username AWS --password-stdin "${AWS_REGISTRY}"
+          gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
+
+          for component in demo-app-backend demo-app-frontend; do
+            source_image="${AWS_REGISTRY}/financial/${component}:${IMAGE_TAG}"
+            target_image="${GCP_REGISTRY}/${component}:${IMAGE_TAG}"
+            docker pull "${source_image}"
+            docker tag "${source_image}" "${target_image}"
+            docker push "${target_image}"
+          done
+
+      - name: Configure kubectl
+        run: |
+          gcloud container clusters get-credentials "${GKE_CLUSTER_NAME}" \
+            --zone "${GKE_CLUSTER_ZONE}" \
+            --project "${GCP_PROJECT_ID}"
+
+      - name: Apply Cloud SQL credentials and DR workload
+        env:
+          DR_DB_HOST: ${{ vars.GCP_DR_DB_HOST }}
+          DR_DB_USER: ${{ secrets.GCP_DR_DB_USER }}
+          DR_DB_PASSWORD: ${{ secrets.GCP_DR_DB_PASSWORD }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: |
+          set -euo pipefail
+
+          : "${DR_DB_HOST:?Set repository variable GCP_DR_DB_HOST first.}"
+          : "${DR_DB_USER:?Set repository secret GCP_DR_DB_USER first.}"
+          : "${DR_DB_PASSWORD:?Set repository secret GCP_DR_DB_PASSWORD first.}"
+
+          kubectl create namespace stock-demo --dry-run=client -o yaml | kubectl apply -f -
+          kubectl -n stock-demo create secret generic stock-api-db \
+            --from-literal=DB_HOST="${DR_DB_HOST}" \
+            --from-literal=DB_USER="${DR_DB_USER}" \
+            --from-literal=DB_PASSWORD="${DR_DB_PASSWORD}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          cd k8s/stock-demo
+          sed -i "s|newTag: latest|newTag: ${IMAGE_TAG}|g" kustomization.yaml
+          kubectl apply -k .
+
+      - name: Wait for GKE DR workload
+        run: |
+          kubectl -n stock-demo rollout status deployment/stock-api --timeout=5m
+          kubectl -n stock-demo rollout status deployment/stock-web --timeout=5m
+          kubectl -n stock-demo get gateway stock-gw -o yaml
+          kubectl -n stock-demo get service -l gateway.networking.k8s.io/gateway-name=stock-gw -o wide || true
+
+      - name: Verify the application reads Cloud SQL
+        run: |
+          set -euo pipefail
+          kubectl -n stock-demo port-forward service/stock-web 18080:80 >/tmp/stock-web-port-forward.log 2>&1 &
+          PORT_FORWARD_PID=$!
+          trap 'kill "${PORT_FORWARD_PID}" >/dev/null 2>&1 || true' EXIT
+
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error http://127.0.0.1:18080/api/recommendations >/tmp/recommendations.json; then
+              cat /tmp/recommendations.json
+              exit 0
+            fi
+            sleep 2
+          done
+
+          cat /tmp/stock-web-port-forward.log || true
+          echo "GKE DR service could not read Cloud SQL." >&2
+          exit 1

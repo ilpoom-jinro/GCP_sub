@@ -61,17 +61,6 @@ resource "google_sql_database_instance" "dr_standby_db" {
       value = "on"
     }
 
-    # AWS 장애 조치 후 Cloud SQL -> AWS RDS failback 복제를 구성할 때만 활성화합니다.
-    # pglogical preload 설정 변경은 인스턴스 재시작을 유발하므로 정상 DMS 복제 중에는 false를 유지합니다.
-    dynamic "database_flags" {
-      for_each = var.enable_failback_publisher ? [1] : []
-
-      content {
-        name  = "cloudsql.enable_pglogical"
-        value = "on"
-      }
-    }
-
     # 디스크 자동 확장 켜기
     disk_autoresize = true
 
