@@ -38,6 +38,23 @@ resource "google_compute_firewall" "allow_internal" {
   }
 }
 
+# DMS가 Private Service Access 대역에서 Headscale Router를 거쳐 AWS RDS에 연결합니다.
+resource "google_compute_firewall" "allow_dms_to_headscale_router" {
+  name    = "allow-dms-to-headscale-router-postgres"
+  network = google_compute_network.vpc_gcp_prd.name
+
+  source_ranges = [
+    "${google_compute_global_address.private_ip_address.address}/${google_compute_global_address.private_ip_address.prefix_length}"
+  ]
+
+  allow {
+    protocol = "tcp"
+    ports    = ["5432"]
+  }
+
+  target_tags = ["headscale-router"]
+}
+
 resource "google_compute_firewall" "allow_tailscale" {
   name    = "allow-tailscale-udp"
   network = google_compute_network.vpc_gcp_prd.name
