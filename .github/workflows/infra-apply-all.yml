@@ -42,6 +42,7 @@ env:
   TF_VAR_dms_source_username: ${{ vars.DMS_SOURCE_USERNAME || 'gcp_dms_user' }}
   TF_VAR_dms_source_password: ${{ secrets.DMS_SOURCE_PASSWORD || '' }}
   TF_VAR_dms_desired_state: ${{ vars.DMS_DESIRED_STATE || 'NOT_STARTED' }}
+  TF_VAR_enable_failback_publisher: ${{ vars.ENABLE_FAILBACK_PUBLISHER || 'false' }}
   GKE_CLUSTER_NAME: "gke-prd-cluster"
   GKE_CLUSTER_ZONE: "asia-northeast3-a"
 

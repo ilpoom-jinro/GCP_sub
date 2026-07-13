@@ -175,6 +175,46 @@ gcloud database-migration migration-jobs start aws-rds-to-cloudsql-dr \
 - 테스트 데이터는 검증 후 제거하거나, 별도 테스트 테이블에서만 수행한다.
 - 복제 지연과 DMS 오류 로그를 확인한다.
 
+## AWS 장애 조치와 AWS 복귀(failback) 설계
+
+### 동작 원칙
+
+- 현재 DMS 작업은 AWS RDS에서 Cloud SQL로만 데이터를 전송하는 단방향 복제다.
+- AWS 장애 시 Cloud SQL을 promote하면 해당 DMS 작업은 AWS와 연결이 끊기며 완료된다.
+- AWS와 GCP 양쪽에서 동시에 쓰기를 허용하면 데이터 충돌을 자동으로 해결할 수 없다. 어느 시점에도 쓰기 원본은 한 곳만 유지한다.
+- GCP DMS는 PostgreSQL Cloud SQL에서 AWS RDS로 역방향 복제하는 기능을 제공하지 않는다. AWS 복구 후에는 Cloud SQL을 발행자, AWS RDS를 구독자로 하는 PostgreSQL 논리 복제를 별도로 구성한다.
+
+### AWS 장애 시 failover 절차
+
+1. AWS 애플리케이션과 RDS의 쓰기 경로를 중지하거나, AWS 장애로 더 이상 쓰기가 불가능한지 확인한다.
+2. DMS 콘솔에서 복제 지연을 확인한다. 계획된 전환이라면 지연이 0이 될 때까지 기다린다.
+3. `aws-rds-to-cloudsql-dr` migration job을 promote한다.
+4. promote 완료 후 Cloud SQL이 독립 primary가 된 것을 확인한다.
+5. 애플리케이션의 DB 연결을 Cloud SQL로 전환하고, 이 시점부터 GCP만 쓰기 원본으로 사용한다.
+
+### AWS 복구 후 failback 절차
+
+1. 복구된 AWS RDS를 애플리케이션 트래픽에서 분리한다. 이 시점에는 AWS에 쓰기를 절대 허용하지 않는다.
+2. AWS RDS를 GCP 원본과 동일한 schema와 데이터 상태로 재초기화한다. 장애 전의 오래된 데이터를 그대로 둔 RDS에 양방향 복제를 연결하면 안 된다.
+3. GitHub repository variable `ENABLE_FAILBACK_PUBLISHER`를 `true`로 설정하고 `infra/Ecc` apply를 실행한다.
+   - Cloud SQL에 `cloudsql.enable_pglogical=on`을 추가한다.
+   - 이 변경은 Cloud SQL 재시작을 유발하므로 GCP가 primary인 유지보수 창에서 수행한다.
+4. OCI Headscale에 Cloud SQL Private Services Access 대역 `10.177.232.0/24`을 GCP 서브넷 라우터의 advertised route로 승인한다.
+5. Headscale ACL에 AWS 라우터에서 GCP PSA 대역의 PostgreSQL 포트로 가는 규칙을 추가한다.
+6. AWS Headscale Router에 TCP proxy를 구성한다. AWS RDS의 PostgreSQL subscription은 VPC4 Router의 사설 IP와 proxy 포트로 접속하고, proxy가 Tailscale을 거쳐 Cloud SQL `5432`으로 전달한다.
+7. Cloud SQL에서 publication을 만들고, AWS RDS에서 subscription을 만든다. RDS가 구독자로 GCP의 변경을 수신하도록 구성한다.
+8. Cloud SQL publisher와 AWS RDS subscriber의 복제 지연이 0인지 확인한다.
+9. GCP 애플리케이션 쓰기를 중지하고 AWS subscription을 비활성화한다.
+10. 애플리케이션 DB 연결을 AWS RDS로 전환한다.
+11. 다음 DR 주기를 위해 새 AWS RDS -> Cloud SQL DMS migration job을 생성하고 시작한다.
+
+### 금지 사항
+
+- 현재 AWS -> GCP DMS가 `RUNNING` 또는 `CDC` 상태일 때 `ENABLE_FAILBACK_PUBLISHER`를 켜지 않는다.
+- Cloud SQL을 promote하기 전 GCP에 쓰기 트래픽을 보내지 않는다.
+- GCP와 AWS에 동시에 쓰기를 허용하지 않는다.
+- DMS가 완료된 뒤 기존 migration job을 역방향으로 재사용하려 하지 않는다.
+
 ## 운영 주의사항
 
 - DMS 작업이 실행 중인 Cloud SQL 대상은 replica 상태다. 대상에 쓰기 작업을 하면 안 된다.
