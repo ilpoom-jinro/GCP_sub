@@ -5,6 +5,7 @@ resources:
   - namespace.yaml
   - backend.yaml
   - frontend.yaml
+  - autoscaling.yaml
   - gateway.yaml
 
 images:

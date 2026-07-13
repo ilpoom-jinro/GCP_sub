@@ -39,19 +39,25 @@ resource "google_container_cluster" "primary" {
   private_cluster_config {
     enable_private_nodes    = true  # 노드들이 사설 IP만 갖도록 설정 (외부 노출 차단)
     enable_private_endpoint = false # 개발 편의를 위해 마스터 엔드포인트는 공인 유지 (필요시 주석 참고)
-    
+
     # 구글 관리형 마스터 컨트롤 플레인용 사설 IP 대역 (/28 크기 필요)
     # 기존 VPC 내부 대역(subnet-was-gke 등) 및 대역들과 겹치지 않는 임의의 사설 IP를 지정.
-    master_ipv4_cidr_block = "172.16.0.0/28" 
+    master_ipv4_cidr_block = "172.16.0.0/28"
   }
 }
 
 # 3. Spot 인스턴스 노드 풀
 resource "google_container_node_pool" "spot_nodes" {
-  name       = "spot-node-pool"
-  location   = "asia-northeast3-a"
-  cluster    = google_container_cluster.primary.name
-  node_count = 2 # 기본 2대로 시작 (필요시 변경 가능)
+  name     = "spot-node-pool"
+  location = "asia-northeast3-a"
+  cluster  = google_container_cluster.primary.name
+  # node_count는 자동 확장 시작값이다. 이후 실제 노드 수는 Cluster Autoscaler가 관리한다.
+  node_count = var.gke_spot_node_min_count
+
+  autoscaling {
+    min_node_count = var.gke_spot_node_min_count
+    max_node_count = var.gke_spot_node_max_count
+  }
 
   node_config {
     spot         = true
@@ -60,6 +66,11 @@ resource "google_container_node_pool" "spot_nodes" {
     oauth_scopes = [
       "https://www.googleapis.com/auth/cloud-platform"
     ]
+  }
+
+  # Cluster Autoscaler가 조정한 현재 노드 수를 Terraform이 고정값으로 되돌리지 않는다.
+  lifecycle {
+    ignore_changes = [node_count]
   }
 }
 
