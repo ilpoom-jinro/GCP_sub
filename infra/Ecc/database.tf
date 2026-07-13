@@ -37,6 +37,12 @@ resource "google_sql_database_instance" "dr_standby_db" {
   database_version = "POSTGRES_16"
   region           = var.region
 
+  # DMS가 연속 복제 중 대상 인스턴스를 read replica로 전환하면 백업을 비활성화한다.
+  # DR 전환 후 대상이 독립 인스턴스로 promote되면 이 예외를 제거하고 apply한다.
+  lifecycle {
+    ignore_changes = [settings[0].backup_configuration]
+  }
+
   # KMS 열쇠를 사용하도록 설정 (CMEK)
   encryption_key_name = google_kms_crypto_key.sql_disk_key.id
 
