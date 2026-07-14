@@ -80,9 +80,15 @@ jobs:
 
           sudo apt-get update
           sudo apt-get install -y certbot python3-certbot-dns-route53
+
+          certbot_root="${RUNNER_TEMP}/certbot"
+          mkdir -p "${certbot_root}/config" "${certbot_root}/work" "${certbot_root}/logs"
+
           certbot certonly \
+            --config-dir "${certbot_root}/config" \
+            --work-dir "${certbot_root}/work" \
+            --logs-dir "${certbot_root}/logs" \
             --dns-route53 \
-            --dns-route53-propagation-seconds 30 \
             --non-interactive \
             --agree-tos \
             --email "${LETSENCRYPT_EMAIL}" \
@@ -91,8 +97,8 @@ jobs:
             -d gcp.ilpumjinro.store
 
           kubectl -n stock-demo create secret tls "${CERTIFICATE_SECRET}" \
-            --cert "/etc/letsencrypt/live/${CERTIFICATE_NAME}/fullchain.pem" \
-            --key "/etc/letsencrypt/live/${CERTIFICATE_NAME}/privkey.pem" \
+            --cert "${certbot_root}/config/live/${CERTIFICATE_NAME}/fullchain.pem" \
+            --key "${certbot_root}/config/live/${CERTIFICATE_NAME}/privkey.pem" \
             --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Show certificate expiry
