@@ -55,7 +55,7 @@ jobs:
           fi
 
           kubectl -n stock-demo get secret "${CERTIFICATE_SECRET}" \
-            -o jsonpath='{.data.tls\\.crt}' | base64 --decode >/tmp/gcp-dr-tls.crt
+            -o go-template='{{ index .data "tls.crt" }}' | base64 --decode >/tmp/gcp-dr-tls.crt
 
           if openssl x509 -checkend 2592000 -noout -in /tmp/gcp-dr-tls.crt; then
             echo "renew=false" >> "${GITHUB_OUTPUT}"
@@ -104,4 +104,4 @@ jobs:
       - name: Show certificate expiry
         run: |
           kubectl -n stock-demo get secret "${CERTIFICATE_SECRET}" \
-            -o jsonpath='{.data.tls\\.crt}' | base64 --decode | openssl x509 -noout -subject -enddate
+            -o go-template='{{ index .data "tls.crt" }}' | base64 --decode | openssl x509 -noout -subject -enddate
