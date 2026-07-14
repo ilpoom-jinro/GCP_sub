@@ -1,0 +1,50 @@
+name: Check GCP DR DB Failback Readiness
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: gcp-dr-database-failback-preflight
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: ilpoomjinro
+  GCP_REGION: asia-northeast3
+  DMS_MIGRATION_JOB: aws-rds-to-cloudsql-dr
+  CLOUDSQL_INSTANCE: dr-standby-postgres
+
+jobs:
+  preflight:
+    name: Check Cloud SQL failback readiness
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.TF_SA_EMAIL }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Run failback preflight
+        run: |
+          scripts/dr/failback-preflight.sh \
+            --project "${GCP_PROJECT_ID}" \
+            --region "${GCP_REGION}" \
+            --job "${DMS_MIGRATION_JOB}" \
+            --instance "${CLOUDSQL_INSTANCE}"
+
+      - name: Show Cloud SQL private IP
+        run: |
+          gcloud sql instances describe "${CLOUDSQL_INSTANCE}" \
+            --project="${GCP_PROJECT_ID}" \
+            --format='yaml(name,state,masterInstanceName,ipAddresses)'

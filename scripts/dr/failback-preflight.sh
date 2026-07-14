@@ -52,9 +52,9 @@ cat <<'EOF'
 Preflight passed. The following manual infrastructure prerequisites remain before
 reverse replication can be automated:
   1. Fence all AWS writes and rebuild or resynchronize AWS RDS data.
-  2. Advertise and approve the GCP PSA range 10.177.232.0/24 in Headscale.
-  3. Allow AWS router to the PSA range on TCP 5432 in the Headscale ACL.
-  4. Configure an AWS router TCP proxy to Cloud SQL so RDS can reach the publisher.
+  2. Apply the GCP and AWS failback-network Terraform changes.
+  3. Advertise and approve the GCP PSA range in Headscale, then apply its ACL rule.
+  4. Verify the AWS router TCP proxy can reach Cloud SQL on port 5432.
   5. Create Cloud SQL publication and AWS RDS subscription, then wait for zero lag.
 
 Do not enable writes on AWS until the subscription catches up and the GCP writer is fenced.

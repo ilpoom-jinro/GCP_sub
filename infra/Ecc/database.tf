@@ -79,3 +79,8 @@ resource "google_sql_database_instance" "dr_standby_db" {
     }
   }
 }
+
+output "dr_standby_private_ip" {
+  description = "AWS failback TCP proxy의 upstream으로 사용할 Cloud SQL 사설 IP"
+  value       = google_sql_database_instance.dr_standby_db.private_ip_address
+}

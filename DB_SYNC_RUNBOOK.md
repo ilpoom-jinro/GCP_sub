@@ -247,3 +247,5 @@ AWS 복귀는 복구된 RDS를 초기화하고 역방향 네트워크 경로와 
 ```bash
 scripts/dr/failback-preflight.sh
 ```
+
+AWS Router TCP proxy, Headscale PSA route 승인, Cloud SQL 사설 IP 설정 및 통신 검증은 [DB_FAILBACK_NETWORK.md](DB_FAILBACK_NETWORK.md)를 따른다. GitHub Actions에서는 `Check GCP DR DB Failback Readiness` 워크플로로 Cloud SQL 측의 읽기 전용 사전 점검을 실행할 수 있다.

@@ -46,9 +46,18 @@ resource "google_compute_instance" "headscale_vpn" {
     curl -fsSL https://tailscale.com/install.sh | sh
 
     # SNAT 설정 (GKE Pod가 AWS와 통신할 수 있게 IP를 라우터 IP로 위장)
-    iptables -t nat -A POSTROUTING -o tailscale0 -j MASQUERADE
+    iptables -t nat -C POSTROUTING -o tailscale0 -j MASQUERADE 2>/dev/null || \
+      iptables -t nat -A POSTROUTING -o tailscale0 -j MASQUERADE
+
+    # AWS 라우터에서 Cloud SQL PSA 대역으로 전달되는 패킷의 응답 경로를 보장한다.
+    # Cloud SQL에는 Tailscale CGNAT 대역으로 돌아가는 VPC route가 없으므로 GCP 라우터
+    # 사설 NIC IP로 SNAT한다.
+    PRIMARY_INTERFACE=$(ip route show default | awk '/default/ {print $5; exit}')
+    iptables -t nat -C POSTROUTING -s 100.64.0.0/10 -o "$${PRIMARY_INTERFACE}" -j MASQUERADE 2>/dev/null || \
+      iptables -t nat -A POSTROUTING -s 100.64.0.0/10 -o "$${PRIMARY_INTERFACE}" -j MASQUERADE
     # mtu 문제 방지 위해 TCP MSS 조정 (VPN 통신 안정성 향상, 패킷이 커져도 MTU에 맞게 조정)
-    iptables -t mangle -A FORWARD -o tailscale0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+    iptables -t mangle -C FORWARD -o tailscale0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || \
+      iptables -t mangle -A FORWARD -o tailscale0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 
     # 재부팅 시에도 iptables 유지되도록 저장 (iptables-persistent 패키지 필요할 수 있음)
     apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent
@@ -57,7 +66,7 @@ resource "google_compute_instance" "headscale_vpn" {
     # tailscale 실행 커맨드 추가 예정
     # --advertise-routes: GCP의 서브넷 대역을 다른 노드(AWS 등)에 알림 
     # --snat-subnet-routes=false: Tailscale 자체 SNAT를 끄고, 우리가 설정한 iptables SNAT를 사용
-    tailscale up --login-server https://headscale.ilpumjinro.cloud/ --authkey ${var.tailscale_auth_key} --advertise-routes=10.50.0.0/16,10.52.0.0/16,10.53.0.0/20 --snat-subnet-routes=false
+    tailscale up --login-server https://headscale.ilpumjinro.cloud/ --authkey ${var.tailscale_auth_key} --advertise-routes=10.50.0.0/16,10.52.0.0/16,10.53.0.0/20,${google_compute_global_address.private_ip_address.address}/${google_compute_global_address.private_ip_address.prefix_length} --snat-subnet-routes=false
 
   EOF
 }
