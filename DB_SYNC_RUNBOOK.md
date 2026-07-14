@@ -236,8 +236,11 @@ scripts/dr/failover-to-gcp.sh
 `failover-to-gcp.sh`는 기본적으로 사전 점검만 한다. 실제 promote는 AWS의 애플리케이션과 RDS 쓰기 차단을 완료한 뒤 아래처럼 명시적으로 실행한다.
 
 ```bash
-scripts/dr/failover-to-gcp.sh --execute --aws-writes-fenced
+scripts/dr/failover-to-gcp.sh --execute --aws-writes-fenced --confirm PROMOTE_CLOUDSQL_DR
 ```
+
+GitHub Actions에서 실행할 때는 `Promote GCP DR Database` 워크플로를 사용한다. 상세한
+승격 조건과 입력값은 [DB_FAILOVER_AUTOMATION.md](DB_FAILOVER_AUTOMATION.md)를 참고한다.
 
 AWS 복귀는 복구된 RDS를 초기화하고 역방향 네트워크 경로와 native logical replication을 구성해야 한다. 현재는 다음 스크립트가 해당 선행 조건만 확인한다.
 

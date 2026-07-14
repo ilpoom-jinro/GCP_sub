@@ -8,13 +8,15 @@ MIGRATION_JOB="${MIGRATION_JOB:-aws-rds-to-cloudsql-dr}"
 CLOUDSQL_INSTANCE="${CLOUDSQL_INSTANCE:-dr-standby-postgres}"
 EXECUTE=false
 AWS_WRITES_FENCED=false
+CONFIRMATION=""
+MAX_WAIT_SECONDS="${MAX_WAIT_SECONDS:-1200}"
 
 usage() {
   cat <<'EOF'
 Usage: scripts/dr/failover-to-gcp.sh [options]
 
 Runs preflight checks for an AWS RDS to Cloud SQL failover. By default, no change
-is made. Promotion requires both --execute and --aws-writes-fenced.
+is made. Promotion requires --execute, --aws-writes-fenced, and the confirmation text.
 
 Options:
   --project PROJECT_ID
@@ -22,6 +24,7 @@ Options:
   --job JOB_ID
   --instance INSTANCE_ID
   --aws-writes-fenced  Confirm AWS application and database writes are blocked.
+  --confirm TEXT        Required with --execute. Use PROMOTE_CLOUDSQL_DR.
   --execute             Promote the DMS job after all checks pass.
   -h, --help            Show this help.
 EOF
@@ -34,6 +37,7 @@ while [[ $# -gt 0 ]]; do
     --job) MIGRATION_JOB="$2"; shift 2 ;;
     --instance) CLOUDSQL_INSTANCE="$2"; shift 2 ;;
     --aws-writes-fenced) AWS_WRITES_FENCED=true; shift ;;
+    --confirm) CONFIRMATION="$2"; shift 2 ;;
     --execute) EXECUTE=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
@@ -68,13 +72,13 @@ echo "  state: $CLOUDSQL_STATE"
   exit 1
 }
 
-if [[ "$EXECUTE" != true || "$AWS_WRITES_FENCED" != true ]]; then
+if [[ "$EXECUTE" != true || "$AWS_WRITES_FENCED" != true || "$CONFIRMATION" != "PROMOTE_CLOUDSQL_DR" ]]; then
   cat <<'EOF'
 
 Preflight passed. No promotion was executed.
 Before promoting, stop or fence all AWS application and RDS writes. Then run:
 
-  scripts/dr/failover-to-gcp.sh --execute --aws-writes-fenced
+  scripts/dr/failover-to-gcp.sh --execute --aws-writes-fenced --confirm PROMOTE_CLOUDSQL_DR
 EOF
   exit 0
 fi
@@ -89,12 +93,19 @@ OPERATION="$(gcloud database-migration migration-jobs promote "$MIGRATION_JOB" \
 }
 
 echo "Promotion operation: $OPERATION"
-while true; do
+WAITED_SECONDS=0
+while (( WAITED_SECONDS < MAX_WAIT_SECONDS )); do
   DONE="$(gcloud database-migration operations describe "$OPERATION" \
     --project="$PROJECT_ID" --region="$REGION" --format='value(done)')"
   [[ "$DONE" == "True" || "$DONE" == "true" ]] && break
   sleep 10
+  WAITED_SECONDS=$((WAITED_SECONDS + 10))
 done
+
+[[ "$DONE" == "True" || "$DONE" == "true" ]] || {
+  echo "Promotion did not finish within ${MAX_WAIT_SECONDS}s. Inspect operation: $OPERATION" >&2
+  exit 1
+}
 
 ERROR="$(gcloud database-migration operations describe "$OPERATION" \
   --project="$PROJECT_ID" --region="$REGION" --format='value(error.message)')"
@@ -103,8 +114,19 @@ if [[ -n "$ERROR" ]]; then
   exit 1
 fi
 
-echo "Promotion completed. Confirm Cloud SQL is standalone before switching the application."
-gcloud sql instances describe "$CLOUDSQL_INSTANCE" \
-  --project="$PROJECT_ID" \
-  --format='yaml(name,state,masterInstanceName)'
+INSTANCE_STATE="$(gcloud sql instances describe "$CLOUDSQL_INSTANCE" \
+  --project="$PROJECT_ID" --format='value(state)')"
+MASTER_INSTANCE="$(gcloud sql instances describe "$CLOUDSQL_INSTANCE" \
+  --project="$PROJECT_ID" --format='value(masterInstanceName)')"
+
+[[ "$INSTANCE_STATE" == "RUNNABLE" ]] || {
+  echo "Promotion finished but Cloud SQL is not RUNNABLE: $INSTANCE_STATE" >&2
+  exit 1
+}
+[[ -z "$MASTER_INSTANCE" ]] || {
+  echo "Promotion finished but Cloud SQL is still a replica of: $MASTER_INSTANCE" >&2
+  exit 1
+}
+
+echo "Promotion completed. Cloud SQL is now the standalone primary writer."
 echo "Application DB endpoint switching is intentionally not automated by this script."

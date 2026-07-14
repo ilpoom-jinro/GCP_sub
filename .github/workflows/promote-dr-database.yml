@@ -1,0 +1,98 @@
+name: Promote GCP DR Database
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "preflight only, or promote the Cloud SQL destination"
+        required: true
+        default: preflight
+        type: choice
+        options:
+          - preflight
+          - promote
+      aws_writes_fenced:
+        description: "Confirm that AWS application and RDS writes are blocked"
+        required: true
+        default: false
+        type: boolean
+      confirmation:
+        description: "Required for promote: type PROMOTE_CLOUDSQL_DR"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: gcp-dr-database-promotion
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: ilpoomjinro
+  GCP_REGION: asia-northeast3
+  DMS_MIGRATION_JOB: aws-rds-to-cloudsql-dr
+  CLOUDSQL_INSTANCE: dr-standby-postgres
+
+jobs:
+  promote:
+    name: Preflight and Promote Cloud SQL
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.TF_SA_EMAIL }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Run failover preflight
+        run: |
+          scripts/dr/failover-to-gcp.sh \
+            --project "${GCP_PROJECT_ID}" \
+            --region "${GCP_REGION}" \
+            --job "${DMS_MIGRATION_JOB}" \
+            --instance "${CLOUDSQL_INSTANCE}"
+
+      - name: Promote Cloud SQL destination
+        if: inputs.mode == 'promote'
+        env:
+          AWS_WRITES_FENCED: ${{ inputs.aws_writes_fenced }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+
+          [[ "${AWS_WRITES_FENCED}" == "true" ]] || {
+            echo "AWS writes must be fenced before promotion." >&2
+            exit 1
+          }
+          [[ "${CONFIRMATION}" == "PROMOTE_CLOUDSQL_DR" ]] || {
+            echo "Confirmation must equal PROMOTE_CLOUDSQL_DR." >&2
+            exit 1
+          }
+
+          scripts/dr/failover-to-gcp.sh \
+            --project "${GCP_PROJECT_ID}" \
+            --region "${GCP_REGION}" \
+            --job "${DMS_MIGRATION_JOB}" \
+            --instance "${CLOUDSQL_INSTANCE}" \
+            --aws-writes-fenced \
+            --execute \
+            --confirm "${CONFIRMATION}"
+
+      - name: Show final database role
+        run: |
+          gcloud database-migration migration-jobs describe "${DMS_MIGRATION_JOB}" \
+            --project="${GCP_PROJECT_ID}" \
+            --region="${GCP_REGION}" \
+            --format='yaml(state,phase,updateTime)'
+          gcloud sql instances describe "${CLOUDSQL_INSTANCE}" \
+            --project="${GCP_PROJECT_ID}" \
+            --format='yaml(name,state,masterInstanceName)'
