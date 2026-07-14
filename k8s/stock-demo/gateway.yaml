@@ -8,12 +8,6 @@ metadata:
     networking.istio.io/service-type: LoadBalancer
 spec:
   gatewayClassName: istio
-  infrastructure:
-    # The deployment workflow creates this ConfigMap with the Terraform-reserved IP.
-    parametersRef:
-      group: ""
-      kind: ConfigMap
-      name: stock-gw-options
   listeners:
     - name: http
       protocol: HTTP

@@ -90,16 +90,6 @@ jobs:
           test -n "${gateway_ip}"
           echo "address=${gateway_ip}" >> "${GITHUB_OUTPUT}"
 
-          cat >/tmp/stock-gw-service.yaml <<EOF
-          spec:
-            type: LoadBalancer
-            loadBalancerIP: ${gateway_ip}
-          EOF
-
-          kubectl -n stock-demo create configmap stock-gw-options \
-            --from-file=service=/tmp/stock-gw-service.yaml \
-            --dry-run=client -o yaml | kubectl apply -f -
-
       - name: Apply Cloud SQL credentials and DR workload
         env:
           DR_DB_HOST: ${{ vars.GCP_DR_DB_HOST }}
@@ -123,6 +113,24 @@ jobs:
           cd k8s/stock-demo
           sed -i "s|newTag: latest|newTag: ${IMAGE_TAG}|g" kustomization.yaml
           kubectl apply -k .
+
+      - name: Assign the reserved IP to the Gateway Service
+        env:
+          GATEWAY_STATIC_IP: ${{ steps.gateway_ip.outputs.address }}
+        run: |
+          set -euo pipefail
+
+          for attempt in $(seq 1 30); do
+            if kubectl -n stock-demo get service stock-gw-istio >/dev/null 2>&1; then
+              break
+            fi
+            sleep 2
+          done
+
+          kubectl -n stock-demo get service stock-gw-istio >/dev/null
+          kubectl -n stock-demo patch service stock-gw-istio \
+            --type=merge \
+            -p "{\"spec\":{\"loadBalancerIP\":\"${GATEWAY_STATIC_IP}\"}}"
 
       - name: Wait for GKE DR workload
         env:
