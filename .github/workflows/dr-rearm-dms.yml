@@ -39,6 +39,9 @@ env:
   CLOUDSQL_INSTANCE: dr-standby-postgres
   GKE_CLUSTER_NAME: gke-prd-cluster
   GKE_CLUSTER_ZONE: asia-northeast3-a
+  AWS_REVERSE_REPLICATION_CLEANUP_DOCUMENT: financial-vpc4-cloudsql-reverse-replication-cleanup
+  AWS_DR_ROUTER_INSTANCE_ID: ${{ vars.AWS_DR_ROUTER_INSTANCE_ID }}
+  AWS_REGION: ${{ secrets.AWS_REGION || 'ap-northeast-2' }}
 
 jobs:
   rearm:
@@ -59,6 +62,13 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
         with:
           install_components: gke-gcloud-auth-plugin
+
+      - name: Authenticate to AWS for reverse replication cleanup
+        if: inputs.mode == 'rearm'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DR_ROUTE53_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Configure kubectl for GKE DR
         run: |
@@ -93,6 +103,45 @@ jobs:
             echo "Confirmation must equal REARM_AWS_TO_GCP_DMS." >&2
             exit 1
           }
+          [[ -n "${AWS_DR_ROUTER_INSTANCE_ID}" ]] || {
+            echo "Repository Variable AWS_DR_ROUTER_INSTANCE_ID is required for DMS rearm." >&2
+            exit 1
+          }
+
+      - name: Remove prior Cloud SQL to AWS reverse replication
+        if: inputs.mode == 'rearm'
+        run: |
+          set -euo pipefail
+          command_id="$(aws ssm send-command \
+            --document-name "${AWS_REVERSE_REPLICATION_CLEANUP_DOCUMENT}" \
+            --instance-ids "${AWS_DR_ROUTER_INSTANCE_ID}" \
+            --comment "Remove reverse replication before AWS to GCP DMS rearm" \
+            --query 'Command.CommandId' \
+            --output text)"
+          echo "Started reverse-replication cleanup SSM command: ${command_id}"
+
+          for _ in $(seq 1 90); do
+            status="$(aws ssm get-command-invocation \
+              --command-id "${command_id}" \
+              --instance-id "${AWS_DR_ROUTER_INSTANCE_ID}" \
+              --query Status \
+              --output text 2>/dev/null || true)"
+            echo "Reverse-replication cleanup status: ${status:-Pending}"
+            case "${status}" in
+              Success) exit 0 ;;
+              Cancelled|Failed|TimedOut)
+                aws ssm get-command-invocation \
+                  --command-id "${command_id}" \
+                  --instance-id "${AWS_DR_ROUTER_INSTANCE_ID}" \
+                  --query '{Status:Status,StandardErrorContent:StandardErrorContent}' \
+                  --output json >&2 || true
+                exit 1 ;;
+            esac
+            sleep 10
+          done
+
+          echo "Timed out waiting for reverse-replication cleanup." >&2
+          exit 1
 
       - name: Recreate AWS to GCP DMS cycle
         if: inputs.mode == 'rearm'
