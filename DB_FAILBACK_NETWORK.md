@@ -106,7 +106,38 @@ AWS_ROUTER_IP=<AWS_HEADSCALE_ROUTER_PRIVATE_IP>
 timeout 5 bash -c "</dev/tcp/$AWS_ROUTER_IP/15432" && echo "Failback proxy reachable"
 ```
 
-두 검증이 성공해도 아직 데이터 복제는 시작되지 않습니다. AWS RDS 초기화 후 Cloud SQL publication과 AWS RDS subscription을 생성하는 다음 단계에서만 reverse replication이 시작됩니다.
+두 검증이 성공해도 아직 데이터 복제는 시작되지 않습니다. AWS Terraform `reapply`는 Router에 PostgreSQL 16 client와 `/usr/local/sbin/cloudsql-reverse-replication` 실행기를 배포합니다.
+
+## 역복제 실행기
+
+이 실행기는 AWS Router에서 Cloud SQL을 덤프해 AWS RDS를 기준점부터 재구성하고, Cloud SQL publication과 AWS RDS subscription을 생성합니다. 기본 실행은 읽기 전용 점검이며, 실제 데이터 변경에는 명시적 확인 인자가 필요합니다.
+
+AWS Router의 SSM Session Manager에서 아래 환경 변수를 현재 비밀번호로 설정한 뒤 점검을 실행합니다. 비밀번호는 명령 출력이나 GitHub Actions 로그에 남기지 마십시오.
+
+```bash
+export CLOUDSQL_ADMIN_USER=postgres
+export CLOUDSQL_ADMIN_PASSWORD='<Cloud SQL postgres password>'
+export RDS_HOST='financial-service-db.<endpoint>.rds.amazonaws.com'
+export RDS_ADMIN_USER=financial_admin
+export RDS_ADMIN_PASSWORD='<AWS RDS administrator password>'
+export FAILBACK_PROXY_HOST='<AWS Router private IP>'
+export REPLICATION_PASSWORD='<new dedicated Cloud SQL replication password>'
+
+sudo -E cloudsql-reverse-replication
+```
+
+Cloud SQL이 유일한 쓰기 원본이고 AWS 애플리케이션 및 RDS 쓰기를 완전히 차단했으며, AWS RDS 데이터를 Cloud SQL 기준으로 교체해도 될 때만 실행합니다.
+
+```bash
+sudo -E cloudsql-reverse-replication \
+  --execute \
+  --gcp-writes-fenced \
+  --rebuild-rds-from-cloudsql \
+  --terminate-rds-sessions \
+  --confirm CREATE_REVERSE_REPLICATION
+```
+
+성공하면 Cloud SQL publisher slot 지연이 `65536` bytes 이하가 될 때까지 대기합니다. 이 상태에서 GCP 쓰기를 차단하고 `DR Failback to AWS` 워크플로를 실행해 Route 53을 AWS로 돌립니다.
 
 ## 보안 원칙
 

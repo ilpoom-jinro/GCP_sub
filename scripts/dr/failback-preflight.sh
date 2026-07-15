@@ -11,7 +11,7 @@ usage() {
   cat <<'EOF'
 Usage: scripts/dr/failback-preflight.sh [--project PROJECT_ID] [--region REGION] [--job JOB_ID] [--instance INSTANCE_ID]
 
-Checks whether the promoted Cloud SQL instance is ready for failback planning.
+Checks whether the promoted Cloud SQL instance is ready for reverse-replication planning.
 It does not create a reverse replication subscription or switch application traffic.
 EOF
 }
@@ -49,13 +49,12 @@ echo "cloudsql.logical_decoding: ${LOGICAL_DECODING:-not-set}"
 
 cat <<'EOF'
 
-Preflight passed. The following manual infrastructure prerequisites remain before
-reverse replication can be automated:
-  1. Fence all AWS writes and rebuild or resynchronize AWS RDS data.
-  2. Apply the GCP and AWS failback-network Terraform changes.
-  3. Advertise and approve the GCP PSA range in Headscale, then apply its ACL rule.
-  4. Verify the AWS router TCP proxy can reach Cloud SQL on port 5432.
-  5. Create Cloud SQL publication and AWS RDS subscription, then wait for zero lag.
+Preflight passed. Before reverse replication, fence all writes to AWS RDS, apply
+the failback network changes, and verify the AWS Router Cloud SQL proxy.
+
+The AWS Router command `cloudsql-reverse-replication` performs the protected
+baseline export/restore and native logical-replication setup. It must be run
+only after GCP is the sole writer and the AWS RDS target may be replaced.
 
 Do not enable writes on AWS until the subscription catches up and the GCP writer is fenced.
 EOF
