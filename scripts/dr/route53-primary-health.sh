@@ -4,16 +4,21 @@ set -euo pipefail
 
 AWS_REGION="${AWS_REGION:-ap-northeast-2}"
 HEALTH_CHECK_FQDN="${HEALTH_CHECK_FQDN:-health.ilpumjinro.store}"
+FORCE_FAILOVER_ALARM_NAME="${FORCE_FAILOVER_ALARM_NAME:-financial-stock-web-dr-force-failover}"
+FORCE_FAILOVER_METRIC_NAMESPACE="${FORCE_FAILOVER_METRIC_NAMESPACE:-Ilpoomjinro/DR}"
+FORCE_FAILOVER_METRIC_NAME="${FORCE_FAILOVER_METRIC_NAME:-ForceFailover}"
+FORCE_FAILOVER_DIMENSION_NAME="${FORCE_FAILOVER_DIMENSION_NAME:-Service}"
+FORCE_FAILOVER_DIMENSION_VALUE="${FORCE_FAILOVER_DIMENSION_VALUE:-stock-web}"
 ACTION="${1:-status}"
-MAX_WAIT_SECONDS="${MAX_WAIT_SECONDS:-300}"
+MAX_WAIT_SECONDS="${MAX_WAIT_SECONDS:-600}"
 
 usage() {
   cat <<'EOF'
 Usage: scripts/dr/route53-primary-health.sh [status|failover|failback]
 
-status    Show the AWS PRIMARY health-check configuration and current status.
-failover  Invert the health check so Route 53 treats the AWS PRIMARY as failed.
-failback  Remove inversion so Route 53 follows the real AWS health status.
+status    Show endpoint, calculated health-check, and DR test-gate states.
+failover  Emit a DR test metric so Route 53 treats AWS PRIMARY as failed.
+failback  Clear the DR test metric and follow the real AWS health status.
 EOF
 }
 
@@ -26,35 +31,55 @@ esac
 command -v aws >/dev/null || { echo "aws CLI is required." >&2; exit 1; }
 command -v jq >/dev/null || { echo "jq is required." >&2; exit 1; }
 
-mapfile -t HEALTH_CHECK_IDS < <(
+mapfile -t ENDPOINT_HEALTH_CHECK_IDS < <(
   aws route53 list-health-checks --region "$AWS_REGION" --output json |
     jq -r --arg fqdn "$HEALTH_CHECK_FQDN" \
-      '.HealthChecks[] | select(.HealthCheckConfig.FullyQualifiedDomainName == $fqdn) | .Id'
+      '.HealthChecks[] | select(.HealthCheckConfig.Type == "HTTPS" and .HealthCheckConfig.FullyQualifiedDomainName == $fqdn) | .Id'
 )
 
-if (( ${#HEALTH_CHECK_IDS[@]} != 1 )); then
-  echo "Expected exactly one Route 53 health check for ${HEALTH_CHECK_FQDN}; found ${#HEALTH_CHECK_IDS[@]}." >&2
+if (( ${#ENDPOINT_HEALTH_CHECK_IDS[@]} != 1 )); then
+  echo "Expected exactly one HTTPS health check for ${HEALTH_CHECK_FQDN}; found ${#ENDPOINT_HEALTH_CHECK_IDS[@]}." >&2
   exit 1
 fi
 
-HEALTH_CHECK_ID="${HEALTH_CHECK_IDS[0]}"
+ENDPOINT_HEALTH_CHECK_ID="${ENDPOINT_HEALTH_CHECK_IDS[0]}"
 
-CURRENT_INVERTED="$(aws route53 get-health-check --health-check-id "$HEALTH_CHECK_ID" \
-  --region "$AWS_REGION" --query 'HealthCheck.HealthCheckConfig.Inverted' --output text)"
-CURRENT_STATUS="$(aws route53 get-health-check-status --health-check-id "$HEALTH_CHECK_ID" \
-  --region "$AWS_REGION" --query 'HealthCheckObservations[0].StatusReport.Status' --output text)"
+mapfile -t EFFECTIVE_HEALTH_CHECK_IDS < <(
+  aws route53 list-health-checks --region "$AWS_REGION" --output json |
+    jq -r --arg endpoint_id "$ENDPOINT_HEALTH_CHECK_ID" \
+      '.HealthChecks[] | select(.HealthCheckConfig.Type == "CALCULATED" and ((.HealthCheckConfig.ChildHealthChecks // []) | index($endpoint_id))) | .Id'
+)
+
+if (( ${#EFFECTIVE_HEALTH_CHECK_IDS[@]} != 1 )); then
+  echo "Expected exactly one calculated health check using ${ENDPOINT_HEALTH_CHECK_ID}; found ${#EFFECTIVE_HEALTH_CHECK_IDS[@]}." >&2
+  exit 1
+fi
+
+EFFECTIVE_HEALTH_CHECK_ID="${EFFECTIVE_HEALTH_CHECK_IDS[0]}"
+
+health_status() {
+  local health_check_id="$1"
+  aws route53 get-health-check-status --health-check-id "$health_check_id" \
+    --region "$AWS_REGION" --query 'HealthCheckObservations[0].StatusReport.Status' --output text
+}
+
+alarm_state() {
+  aws cloudwatch describe-alarms --region "$AWS_REGION" \
+    --alarm-names "$FORCE_FAILOVER_ALARM_NAME" \
+    --query 'MetricAlarms[0].StateValue' --output text
+}
 
 show_status() {
-  local inverted status
-  inverted="$(aws route53 get-health-check --health-check-id "$HEALTH_CHECK_ID" \
-    --region "$AWS_REGION" --query 'HealthCheck.HealthCheckConfig.Inverted' --output text)"
-  status="$(aws route53 get-health-check-status --health-check-id "$HEALTH_CHECK_ID" \
-    --region "$AWS_REGION" --query 'HealthCheckObservations[0].StatusReport.Status' --output text)"
-  echo "Route 53 AWS PRIMARY health check"
-  echo "  id: $HEALTH_CHECK_ID"
+  echo "Route 53 AWS endpoint health check"
+  echo "  id: $ENDPOINT_HEALTH_CHECK_ID"
   echo "  fqdn: $HEALTH_CHECK_FQDN"
-  echo "  inverted: $inverted"
-  echo "  observed status: $status"
+  echo "  observed status: $(health_status "$ENDPOINT_HEALTH_CHECK_ID")"
+  echo "Route 53 AWS effective calculated health check"
+  echo "  id: $EFFECTIVE_HEALTH_CHECK_ID"
+  echo "  observed status: $(health_status "$EFFECTIVE_HEALTH_CHECK_ID")"
+  echo "DR test-gate CloudWatch alarm"
+  echo "  name: $FORCE_FAILOVER_ALARM_NAME"
+  echo "  state: $(alarm_state)"
 }
 
 if [[ "$ACTION" == "status" ]]; then
@@ -63,30 +88,26 @@ if [[ "$ACTION" == "status" ]]; then
 fi
 
 if [[ "$ACTION" == "failover" ]]; then
-  if [[ "$CURRENT_INVERTED" == "False" && "$CURRENT_STATUS" == "Failure"* ]]; then
-    echo "AWS PRIMARY is already unhealthy without inversion; Route 53 is failing over naturally."
-    show_status
-    exit 0
-  fi
-  aws route53 update-health-check --health-check-id "$HEALTH_CHECK_ID" \
-    --region "$AWS_REGION" --inverted >/dev/null
-  EXPECTED_INVERTED="True"
-  EXPECTED_STATUS="Failure"
+  METRIC_VALUE=1
+  EXPECTED_ALARM_STATE="ALARM"
+  EXPECTED_EFFECTIVE_STATUS="Failure"
 else
-  aws route53 update-health-check --health-check-id "$HEALTH_CHECK_ID" \
-    --region "$AWS_REGION" --no-inverted >/dev/null
-  EXPECTED_INVERTED="False"
-  EXPECTED_STATUS="Success"
+  METRIC_VALUE=0
+  EXPECTED_ALARM_STATE="OK"
+  EXPECTED_EFFECTIVE_STATUS="Success"
 fi
+
+aws cloudwatch put-metric-data --region "$AWS_REGION" \
+  --namespace "$FORCE_FAILOVER_METRIC_NAMESPACE" \
+  --metric-data "MetricName=$FORCE_FAILOVER_METRIC_NAME,Dimensions=[{Name=$FORCE_FAILOVER_DIMENSION_NAME,Value=$FORCE_FAILOVER_DIMENSION_VALUE}],Value=$METRIC_VALUE,Unit=Count" \
+  >/dev/null
 
 WAITED_SECONDS=0
 while (( WAITED_SECONDS < MAX_WAIT_SECONDS )); do
-  INVERTED="$(aws route53 get-health-check --health-check-id "$HEALTH_CHECK_ID" \
-    --region "$AWS_REGION" --query 'HealthCheck.HealthCheckConfig.Inverted' --output text)"
-  STATUS="$(aws route53 get-health-check-status --health-check-id "$HEALTH_CHECK_ID" \
-    --region "$AWS_REGION" --query 'HealthCheckObservations[0].StatusReport.Status' --output text)"
+  ALARM_STATE="$(alarm_state)"
+  EFFECTIVE_STATUS="$(health_status "$EFFECTIVE_HEALTH_CHECK_ID")"
 
-  if [[ "$INVERTED" == "$EXPECTED_INVERTED" && "$STATUS" == "$EXPECTED_STATUS"* ]]; then
+  if [[ "$ALARM_STATE" == "$EXPECTED_ALARM_STATE" && "$EFFECTIVE_STATUS" == "$EXPECTED_EFFECTIVE_STATUS"* ]]; then
     show_status
     exit 0
   fi
@@ -96,5 +117,5 @@ while (( WAITED_SECONDS < MAX_WAIT_SECONDS )); do
 done
 
 show_status
-echo "Route 53 did not reach expected status ${EXPECTED_STATUS} within ${MAX_WAIT_SECONDS}s." >&2
+echo "Route 53 did not reach expected status ${EXPECTED_EFFECTIVE_STATUS} within ${MAX_WAIT_SECONDS}s." >&2
 exit 1
