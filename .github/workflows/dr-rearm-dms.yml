@@ -1,0 +1,106 @@
+name: Rearm AWS to GCP DMS
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Run checks only, or recreate the AWS to GCP DMS cycle"
+        required: true
+        default: preflight
+        type: choice
+        options:
+          - preflight
+          - rearm
+      gcp_writes_fenced:
+        description: "Confirm GCP application database writes are blocked"
+        required: true
+        default: false
+        type: boolean
+      confirmation:
+        description: "Required for rearm: type REARM_AWS_TO_GCP_DMS"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: production-dr-switch
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: ilpoomjinro
+  GCP_REGION: asia-northeast3
+  GCP_NETWORK: projects/ilpoomjinro/global/networks/vpc-gcp-prd
+  DMS_MIGRATION_JOB: aws-rds-to-cloudsql-dr
+  DMS_SOURCE_PROFILE: aws-postgres-source
+  DMS_DESTINATION_PROFILE: cloudsql-dr-destination
+  CLOUDSQL_INSTANCE: dr-standby-postgres
+  GKE_CLUSTER_NAME: gke-prd-cluster
+  GKE_CLUSTER_ZONE: asia-northeast3-a
+
+jobs:
+  rearm:
+    name: Validate and rearm AWS to GCP DMS
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.TF_SA_EMAIL }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          install_components: gke-gcloud-auth-plugin
+
+      - name: Configure kubectl for GKE DR
+        run: |
+          gcloud container clusters get-credentials "${GKE_CLUSTER_NAME}" \
+            --zone "${GKE_CLUSTER_ZONE}" \
+            --project "${GCP_PROJECT_ID}"
+
+      - name: Verify GCP write fence
+        run: |
+          kubectl -n stock-demo get networkpolicy dr-fence-stock-api-egress
+
+      - name: Run DMS rearm preflight
+        if: inputs.mode == 'preflight'
+        run: |
+          scripts/dr/rearm-aws-to-gcp-dms.sh \
+            --project "${GCP_PROJECT_ID}" \
+            --region "${GCP_REGION}" \
+            --network "${GCP_NETWORK}"
+
+      - name: Validate DMS rearm approval
+        if: inputs.mode == 'rearm'
+        env:
+          GCP_WRITES_FENCED: ${{ inputs.gcp_writes_fenced }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          [[ "${GCP_WRITES_FENCED}" == "true" ]] || {
+            echo "Confirm GCP application database writes are blocked before DMS rearm." >&2
+            exit 1
+          }
+          [[ "${CONFIRMATION}" == "REARM_AWS_TO_GCP_DMS" ]] || {
+            echo "Confirmation must equal REARM_AWS_TO_GCP_DMS." >&2
+            exit 1
+          }
+
+      - name: Recreate AWS to GCP DMS cycle
+        if: inputs.mode == 'rearm'
+        run: |
+          scripts/dr/rearm-aws-to-gcp-dms.sh \
+            --execute \
+            --gcp-writes-fenced \
+            --confirm REARM_AWS_TO_GCP_DMS \
+            --project "${GCP_PROJECT_ID}" \
+            --region "${GCP_REGION}" \
+            --network "${GCP_NETWORK}"

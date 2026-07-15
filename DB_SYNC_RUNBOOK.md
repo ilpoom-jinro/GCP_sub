@@ -203,8 +203,32 @@ gcloud database-migration migration-jobs start aws-rds-to-cloudsql-dr \
 7. Cloud SQL에서 native publication을 만들고, AWS RDS에서 native subscription을 만든다. RDS가 구독자로 GCP의 변경을 수신하도록 구성한다.
 8. Cloud SQL publisher와 AWS RDS subscriber의 복제 지연이 0인지 확인한다.
 9. GCP 애플리케이션 쓰기를 중지하고 AWS subscription을 비활성화한다.
+
 10. 애플리케이션 DB 연결을 AWS RDS로 전환한다.
 11. 다음 DR 주기를 위해 새 AWS RDS -> Cloud SQL DMS migration job을 생성하고 시작한다.
+
+### 다음 DR 주기 재구성
+
+failback이 끝나면 Cloud SQL은 독립 인스턴스이고, 기존 AWS RDS -> Cloud SQL
+DMS 작업은 promote로 종료된 상태다. 다음 장애 조치를 준비하려면 AWS를 유일한
+쓰기 원본으로 유지한 채 새 DMS continuous migration을 만들어야 한다.
+
+`Rearm AWS to GCP DMS` GitHub Actions workflow는 이 작업을 자동화한다.
+
+1. AWS 공개 트래픽과 AWS 애플리케이션 쓰기가 정상인지 확인한다.
+2. GCP `dr-fence-stock-api-egress` NetworkPolicy가 존재하여 GCP 애플리케이션
+   DB 쓰기가 차단됐는지 확인한다.
+3. workflow를 `preflight`으로 실행한다. Cloud SQL이 standalone `RUNNABLE`이고
+   이전 DMS job이 `RUNNING`이 아닌지 확인한다.
+4. 실제 실행은 `rearm`을 선택하고 쓰기 차단 확인을 체크한 뒤
+   `REARM_AWS_TO_GCP_DMS`를 입력한다.
+
+실행 작업은 이전 DMS job과 destination connection profile만 `--force` 없이
+삭제한다. Cloud SQL 인스턴스와 private IP는 삭제하지 않는다. 이어서 기존
+`dr-standby-postgres`를 대상으로 새 destination profile과 continuous job을
+생성하고, TLS REQUIRED 적용, destination demote, verify, start, `RUNNING/CDC`
+도달까지 확인한다. 새 주기의 초기 적재는 AWS RDS를 기준으로 수행되므로 GCP에
+남아 있던 이전 장애 조치 데이터는 AWS 원본 데이터로 대체될 수 있다.
 
 ### 금지 사항
 
@@ -231,6 +255,7 @@ gcloud database-migration migration-jobs start aws-rds-to-cloudsql-dr \
 ```bash
 scripts/dr/status.sh
 scripts/dr/failover-to-gcp.sh
+scripts/dr/rearm-aws-to-gcp-dms.sh
 ```
 
 `failover-to-gcp.sh`는 기본적으로 사전 점검만 한다. 실제 promote는 AWS의 애플리케이션과 RDS 쓰기 차단을 완료한 뒤 아래처럼 명시적으로 실행한다.
