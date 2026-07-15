@@ -11,11 +11,6 @@ on:
         options:
           - preflight
           - failback
-      reverse_replication_caught_up:
-        description: "Confirm Cloud SQL to RDS replication is caught up with zero lag"
-        required: true
-        default: false
-        type: boolean
       gcp_writes_fenced:
         description: "Required only when GCP is already unavailable and cannot be fenced automatically"
         required: true
@@ -49,6 +44,10 @@ env:
   CLOUDSQL_INSTANCE: dr-standby-postgres
   GKE_CLUSTER_NAME: gke-prd-cluster
   GKE_CLUSTER_ZONE: asia-northeast3-a
+  AWS_DR_WRITE_FENCE_PROJECT: financial-service-dr-write-fence
+  AWS_REVERSE_REPLICATION_DOCUMENT: financial-vpc4-cloudsql-reverse-replication
+  AWS_FAILBACK_CREDENTIALS_SECRET: financial-cloudsql-failback-credentials
+  AWS_DR_ROUTER_INSTANCE_ID: ${{ vars.AWS_DR_ROUTER_INSTANCE_ID }}
   AWS_REGION: ${{ secrets.AWS_REGION || 'ap-northeast-2' }}
 
 jobs:
@@ -94,16 +93,11 @@ jobs:
       - name: Validate failback approval
         if: inputs.mode == 'failback'
         env:
-          REVERSE_REPLICATION_CAUGHT_UP: ${{ inputs.reverse_replication_caught_up }}
           GCP_WRITES_FENCED: ${{ inputs.gcp_writes_fenced }}
           GCP_WRITE_FENCE_MODE: ${{ inputs.gcp_write_fence_mode }}
           CONFIRMATION: ${{ inputs.confirmation }}
         run: |
           set -euo pipefail
-          [[ "${REVERSE_REPLICATION_CAUGHT_UP}" == "true" ]] || {
-            echo "Reverse replication must be caught up before failback." >&2
-            exit 1
-          }
           if [[ "${GCP_WRITE_FENCE_MODE}" == "already-unavailable" ]]; then
             [[ "${GCP_WRITES_FENCED}" == "true" ]] || {
               echo "Confirm GCP writes are already unavailable before failback." >&2
@@ -112,6 +106,10 @@ jobs:
           fi
           [[ "${CONFIRMATION}" == "FAILBACK_TO_AWS" ]] || {
             echo "Confirmation must equal FAILBACK_TO_AWS." >&2
+            exit 1
+          }
+          [[ -n "${AWS_DR_ROUTER_INSTANCE_ID}" ]] || {
+            echo "Repository Variable AWS_DR_ROUTER_INSTANCE_ID is required for failback." >&2
             exit 1
           }
 
@@ -125,6 +123,87 @@ jobs:
       - name: Fence GCP application database writes
         if: inputs.mode == 'failback' && inputs.gcp_write_fence_mode == 'automated'
         run: bash scripts/dr/fence-gke-writes.sh fence
+
+      - name: Store one-time reverse replication credentials
+        if: inputs.mode == 'failback'
+        env:
+          CLOUDSQL_ADMIN_USER: ${{ secrets.GCP_DR_DB_USER }}
+          CLOUDSQL_ADMIN_PASSWORD: ${{ secrets.GCP_DR_DB_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${CLOUDSQL_ADMIN_USER:?GCP_DR_DB_USER is required}"
+          : "${CLOUDSQL_ADMIN_PASSWORD:?GCP_DR_DB_PASSWORD is required}"
+
+          replication_password="$(openssl rand -base64 48 | tr -d '\n' | tr '/+' 'Aa' | cut -c1-48)"
+          secret_payload="$(jq -cn \
+            --arg cloudsql_admin_user "${CLOUDSQL_ADMIN_USER}" \
+            --arg cloudsql_admin_password "${CLOUDSQL_ADMIN_PASSWORD}" \
+            --arg replication_password "${replication_password}" \
+            '{cloudsql_admin_user: $cloudsql_admin_user, cloudsql_admin_password: $cloudsql_admin_password, replication_password: $replication_password}')"
+
+          aws secretsmanager put-secret-value \
+            --secret-id "${AWS_FAILBACK_CREDENTIALS_SECRET}" \
+            --secret-string "${secret_payload}" >/dev/null
+
+      - name: Rebuild AWS RDS and start reverse replication
+        if: inputs.mode == 'failback'
+        run: |
+          set -euo pipefail
+
+          command_id="$(aws ssm send-command \
+            --document-name "${AWS_REVERSE_REPLICATION_DOCUMENT}" \
+            --instance-ids "${AWS_DR_ROUTER_INSTANCE_ID}" \
+            --comment "Controlled DR failback Cloud SQL to RDS reverse replication" \
+            --query 'Command.CommandId' \
+            --output text)"
+          echo "Started reverse-replication SSM command: ${command_id}"
+
+          for _ in $(seq 1 180); do
+            status="$(aws ssm get-command-invocation \
+              --command-id "${command_id}" \
+              --instance-id "${AWS_DR_ROUTER_INSTANCE_ID}" \
+              --query Status \
+              --output text 2>/dev/null || true)"
+            echo "Reverse-replication status: ${status:-Pending}"
+            case "${status}" in
+              Success) exit 0 ;;
+              Cancelled|Failed|TimedOut) \
+                aws ssm get-command-invocation \
+                  --command-id "${command_id}" \
+                  --instance-id "${AWS_DR_ROUTER_INSTANCE_ID}" \
+                  --query '{Status:Status,StandardErrorContent:StandardErrorContent}' \
+                  --output json >&2 || true
+                exit 1 ;;
+            esac
+            sleep 10
+          done
+
+          echo "Timed out waiting for reverse replication." >&2
+          exit 1
+
+      - name: Restore AWS application database writes
+        if: inputs.mode == 'failback'
+        run: |
+          set -euo pipefail
+          build_id="$(aws codebuild start-build \
+            --project-name "${AWS_DR_WRITE_FENCE_PROJECT}" \
+            --environment-variables-override name=DR_WRITE_FENCE_ACTION,value=unfence,type=PLAINTEXT \
+            --query 'build.id' --output text)"
+          echo "Started AWS write-unfence build: ${build_id}"
+
+          for _ in $(seq 1 90); do
+            status="$(aws codebuild batch-get-builds --ids "${build_id}" \
+              --query 'builds[0].buildStatus' --output text)"
+            echo "AWS write-unfence status: ${status}"
+            case "${status}" in
+              SUCCEEDED) exit 0 ;;
+              FAILED|FAULT|STOPPED|TIMED_OUT) exit 1 ;;
+            esac
+            sleep 10
+          done
+
+          echo "Timed out waiting for the AWS write-unfence build." >&2
+          exit 1
 
       - name: Return Route 53 traffic to AWS
         if: inputs.mode == 'failback'

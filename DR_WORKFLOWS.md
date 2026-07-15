@@ -6,12 +6,22 @@ AWS Terraform을 적용한 뒤 다음 output을 확인한다.
 
 ```bash
 terraform output -raw gcp_dr_route53_failover_role_arn
+terraform output -raw vpc4_headscale_router_instance_id
 ```
 
 출력값을 GCP_sub repository secret `AWS_DR_ROUTE53_ROLE_ARN`에 등록한다. 이 역할은
 Route 53 상태 검사를 조회하고 반전하며, 전용 CodeBuild 프로젝트
-`financial-service-dr-write-fence`만 실행할 수 있다. DNS 레코드나 다른 AWS 리소스는
-수정할 수 없다.
+`financial-service-dr-write-fence`와 Router의 고정 역복제 SSM 문서만 실행할 수 있다.
+두 번째 output은 repository variable `AWS_DR_ROUTER_INSTANCE_ID`에 등록한다. DNS 레코드나
+다른 AWS 리소스는 수정할 수 없다.
+
+GCP_sub repository secret에는 아래 두 값도 필요하다.
+
+- `GCP_DR_DB_USER`: Cloud SQL 관리자 사용자명(기본값 `postgres`)
+- `GCP_DR_DB_PASSWORD`: 해당 Cloud SQL 관리자 비밀번호
+
+실제 failback을 실행할 때 워크플로는 이 두 값을 AWS의 전용 Secrets Manager 시크릿으로
+한 번만 전달합니다. 값 자체는 GitHub Actions 로그, SSM 명령 인자, Terraform state에 남지 않습니다.
 
 ## DR Failover to GCP
 
@@ -42,19 +52,16 @@ health check를 반전시켜 Route 53 트래픽을 GCP SECONDARY로 전환한다
 
 ## DR Failback to AWS
 
-이 워크플로는 역복제를 만들거나 RDS를 초기화하지 않는다. 먼저 다음 작업을 완료한다.
+실제 `failback` 모드는 GCP 애플리케이션 쓰기를 차단한 후 Cloud SQL 데이터를 기준으로
+RDS를 재구축하고, Cloud SQL publication과 RDS subscription을 생성합니다. publisher slot
+lag가 정확히 `0 byte`가 될 때만 AWS 쓰기를 다시 열고 Route 53을 AWS로 복귀시킵니다.
+RDS의 기존 `financial_service` 데이터는 Cloud SQL 기준으로 교체됩니다.
 
-1. 복구된 RDS를 서비스 트래픽에서 분리하고 Cloud SQL 기준으로 재초기화한다.
-2. Cloud SQL publication과 RDS subscription을 구성한다.
-3. 역복제 지연이 0이 될 때까지 기다린다.
-4. GCP 애플리케이션과 Cloud SQL 쓰기를 차단한다.
-
-그 다음 아래 입력으로 실행한다.
+실행 입력은 아래와 같습니다.
 
 | 입력 | 값 |
 | --- | --- |
 | `mode` | `failback` |
-| `reverse_replication_caught_up` | `true` |
 | `gcp_write_fence_mode` | `automated` |
 | `confirmation` | `FAILBACK_TO_AWS` |
 
@@ -64,9 +71,10 @@ health check를 반전시켜 Route 53 트래픽을 GCP SECONDARY로 전환한다
 이미 접근 불가능한 실제 장애에서는 `gcp_write_fence_mode: already-unavailable`과
 `gcp_writes_fenced: true`를 함께 사용한다.
 
-워크플로는 AWS 직접 서비스가 정상인지 확인하고 Route 53 health check 반전을 해제한다.
-실제 AWS 상태 검사가 정상일 때만 루트 도메인이 AWS PRIMARY로 복귀한다. GCP HPA와
-클러스터 autoscaler는 트래픽 감소 후 설정된 최소 replica와 node 수로 축소한다.
+워크플로는 AWS 직접 서비스가 정상인지 확인하고, 역복제 완료 후 AWS EKS의 RDS egress
+차단을 해제한 뒤 Route 53 health check 반전을 해제한다. 실제 AWS 상태 검사가 정상일 때만
+루트 도메인이 AWS PRIMARY로 복귀한다. GCP HPA와 클러스터 autoscaler는 트래픽 감소 후
+설정된 최소 replica와 node 수로 축소한다.
 
 ## 소유권과 주의사항
 
