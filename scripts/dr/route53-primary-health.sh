@@ -69,6 +69,21 @@ alarm_state() {
     --query 'MetricAlarms[0].StateValue' --output text
 }
 
+# Route 53 GetHealthCheckStatus API는 CALCULATED type을 지원하지 않는다.
+# 이 calculated check는 endpoint와 test gate 두 자식이 모두 healthy여야 하므로,
+# 동일한 기준으로 상태를 계산해 워크플로의 사전 검증과 대기 조건에 사용한다.
+effective_status() {
+  local endpoint_status alarm
+  endpoint_status="$(health_status "$ENDPOINT_HEALTH_CHECK_ID")"
+  alarm="$(alarm_state)"
+
+  if [[ "$endpoint_status" == "Success"* && "$alarm" == "OK" ]]; then
+    echo "Success"
+  else
+    echo "Failure"
+  fi
+}
+
 show_status() {
   echo "Route 53 AWS endpoint health check"
   echo "  id: $ENDPOINT_HEALTH_CHECK_ID"
@@ -76,7 +91,8 @@ show_status() {
   echo "  observed status: $(health_status "$ENDPOINT_HEALTH_CHECK_ID")"
   echo "Route 53 AWS effective calculated health check"
   echo "  id: $EFFECTIVE_HEALTH_CHECK_ID"
-  echo "  observed status: $(health_status "$EFFECTIVE_HEALTH_CHECK_ID")"
+  echo "  derived status: $(effective_status)"
+  echo "  note: Route 53 GetHealthCheckStatus does not support calculated checks."
   echo "DR test-gate CloudWatch alarm"
   echo "  name: $FORCE_FAILOVER_ALARM_NAME"
   echo "  state: $(alarm_state)"
@@ -105,7 +121,7 @@ aws cloudwatch put-metric-data --region "$AWS_REGION" \
 WAITED_SECONDS=0
 while (( WAITED_SECONDS < MAX_WAIT_SECONDS )); do
   ALARM_STATE="$(alarm_state)"
-  EFFECTIVE_STATUS="$(health_status "$EFFECTIVE_HEALTH_CHECK_ID")"
+  EFFECTIVE_STATUS="$(effective_status)"
 
   if [[ "$ALARM_STATE" == "$EXPECTED_ALARM_STATE" && "$EFFECTIVE_STATUS" == "$EXPECTED_EFFECTIVE_STATUS"* ]]; then
     show_status
