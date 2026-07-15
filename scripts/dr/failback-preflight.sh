@@ -28,6 +28,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 command -v gcloud >/dev/null || { echo "gcloud is required." >&2; exit 1; }
+command -v jq >/dev/null || { echo "jq is required." >&2; exit 1; }
 
 JOB_STATE="$(gcloud database-migration migration-jobs describe "$MIGRATION_JOB" \
   --project="$PROJECT_ID" --region="$REGION" --format='value(state)')"
@@ -36,7 +37,9 @@ CLOUDSQL_STATE="$(gcloud sql instances describe "$CLOUDSQL_INSTANCE" \
 MASTER_INSTANCE="$(gcloud sql instances describe "$CLOUDSQL_INSTANCE" \
   --project="$PROJECT_ID" --format='value(masterInstanceName)')"
 LOGICAL_DECODING="$(gcloud sql instances describe "$CLOUDSQL_INSTANCE" \
-  --project="$PROJECT_ID" --format='value(settings.databaseFlags.filter(name:cloudsql.logical_decoding).value)')"
+  --project="$PROJECT_ID" --format=json | \
+  jq -r '.settings.databaseFlags[]? | select(.name == "cloudsql.logical_decoding") | .value' | \
+  head -n 1)"
 
 echo "DMS state: $JOB_STATE"
 echo "Cloud SQL state: $CLOUDSQL_STATE"
