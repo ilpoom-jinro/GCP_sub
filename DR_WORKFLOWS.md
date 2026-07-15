@@ -32,6 +32,10 @@ GCP_sub repository secret에는 아래 두 값도 필요하다.
 - Cloud SQL `RUNNABLE`
 - Route 53 AWS PRIMARY 상태
 
+평상시 `Deploy GKE DR Service`는 `stock-api`의 egress를 차단하는
+`dr-fence-stock-api-egress` NetworkPolicy를 적용한다. 따라서 GCP 워크로드는 warm
+standby로 유지되지만 DMS replica인 Cloud SQL에는 접근할 수 없다.
+
 실제 장애 전환 또는 계획된 테스트에서는 워크플로가 AWS Service EKS 내부의 전용
 CodeBuild 작업을 실행해 `stock-api`의 RDS 5432 egress를 차단한다. DMS 트래픽은
 애플리케이션 Pod와 분리되어 있으므로 이 차단의 영향을 받지 않는다.
@@ -45,7 +49,9 @@ CodeBuild 작업을 실행해 `stock-api`의 RDS 5432 egress를 차단한다. DM
 AWS 자체가 이미 접근 불가능해 CodeBuild를 실행할 수 없는 실제 장애에서는
 `aws_write_fence_mode: already-unavailable`과 `aws_writes_fenced: true`를 함께 사용한다.
 
-워크플로는 Cloud SQL을 먼저 promote한 뒤, AWS PRIMARY가 정상인 계획 테스트에서는
+워크플로는 Cloud SQL을 먼저 promote하고, promote 성공을 확인한 뒤에만 GCP의
+`dr-fence-stock-api-egress` 정책을 제거하고 API의 Cloud SQL 읽기 연결을 확인한다.
+그 다음 AWS PRIMARY가 정상인 계획 테스트에서는
 health check를 반전시켜 Route 53 트래픽을 GCP SECONDARY로 전환한다. AWS PRIMARY가
 이미 비정상이면 자연 failover 상태를 유지하고 반전하지 않는다. Cloud SQL promote는
 기존 AWS -> GCP DMS 스트림을 영구 종료하므로 단순 UI 테스트 목적으로 실행하면 안 된다.

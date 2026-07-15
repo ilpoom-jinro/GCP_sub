@@ -173,3 +173,9 @@ jobs:
           cat /tmp/stock-web-port-forward.log || true
           echo "GKE DR service could not read Cloud SQL." >&2
           exit 1
+
+      - name: Fence GKE database access while Cloud SQL is standby
+        run: |
+          # Keep the warm DR workload deployed, but prevent its API Pods from
+          # reaching the DMS replica until an approved failover promotes it.
+          bash scripts/dr/fence-gke-writes.sh fence

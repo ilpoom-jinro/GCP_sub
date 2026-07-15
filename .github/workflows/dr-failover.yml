@@ -137,10 +137,6 @@ jobs:
             --zone "${GKE_CLUSTER_ZONE}" \
             --project "${GCP_PROJECT_ID}"
 
-      - name: Remove any previous GCP write fence
-        if: inputs.mode == 'failover'
-        run: bash scripts/dr/fence-gke-writes.sh unfence
-
       - name: Promote Cloud SQL destination
         if: inputs.mode == 'failover'
         run: |
@@ -152,6 +148,30 @@ jobs:
             --aws-writes-fenced \
             --execute \
             --confirm PROMOTE_CLOUDSQL_DR
+
+      - name: Enable GCP application database access after promotion
+        if: inputs.mode == 'failover'
+        run: bash scripts/dr/fence-gke-writes.sh unfence
+
+      - name: Verify promoted GCP application database access
+        if: inputs.mode == 'failover'
+        run: |
+          set -euo pipefail
+          kubectl -n stock-demo rollout status deployment/stock-api --timeout=5m
+          kubectl -n stock-demo port-forward service/stock-web 18080:80 >/tmp/stock-web-port-forward.log 2>&1 &
+          port_forward_pid=$!
+          trap 'kill "${port_forward_pid}" >/dev/null 2>&1 || true' EXIT
+
+          for _ in $(seq 1 30); do
+            if curl --fail --silent --show-error http://127.0.0.1:18080/api/recommendations >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+
+          cat /tmp/stock-web-port-forward.log || true
+          echo "Promoted GCP application could not read Cloud SQL." >&2
+          exit 1
 
       - name: Fail Route 53 over to GCP
         if: inputs.mode == 'failover'

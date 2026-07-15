@@ -5,9 +5,10 @@ usage() {
   cat <<'EOF'
 Usage: fence-gke-writes.sh <status|fence|unfence>
 
-Temporarily blocks every egress connection from stock-demo/stock-api. This
-prevents Cloud SQL writes during a controlled failback. The policy is removed
-before a later failover so the promoted GCP service can use Cloud SQL again.
+Blocks every egress connection from stock-demo/stock-api. The normal DR deploy
+uses this policy while Cloud SQL is a DMS standby replica, and a controlled
+failback uses it before reverse replication. It is removed only after Cloud SQL
+has been promoted during an approved failover.
 EOF
 }
 
@@ -27,7 +28,7 @@ metadata:
   name: ${policy_name}
   namespace: ${namespace}
   annotations:
-    ilpoomjinro.store/dr-purpose: "Temporarily fence stock-api database writes before AWS failback"
+    ilpoomjinro.store/dr-purpose: "Fence stock-api while Cloud SQL is standby or AWS is being restored"
 spec:
   podSelector:
     matchLabels:
