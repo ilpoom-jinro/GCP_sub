@@ -17,10 +17,18 @@ on:
         default: false
         type: boolean
       gcp_writes_fenced:
-        description: "Confirm GCP application and Cloud SQL writes are blocked"
+        description: "Required only when GCP is already unavailable and cannot be fenced automatically"
         required: true
         default: false
         type: boolean
+      gcp_write_fence_mode:
+        description: "How to fence GCP application writes before reverse replication"
+        required: true
+        default: automated
+        type: choice
+        options:
+          - automated
+          - already-unavailable
       confirmation:
         description: "Required for failback: type FAILBACK_TO_AWS"
         required: false
@@ -39,6 +47,8 @@ env:
   GCP_REGION: asia-northeast3
   DMS_MIGRATION_JOB: aws-rds-to-cloudsql-dr
   CLOUDSQL_INSTANCE: dr-standby-postgres
+  GKE_CLUSTER_NAME: gke-prd-cluster
+  GKE_CLUSTER_ZONE: asia-northeast3-a
   AWS_REGION: ${{ secrets.AWS_REGION || 'ap-northeast-2' }}
 
 jobs:
@@ -58,6 +68,8 @@ jobs:
 
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
+        with:
+          install_components: gke-gcloud-auth-plugin
 
       - name: Authenticate to AWS for Route 53
         uses: aws-actions/configure-aws-credentials@v4
@@ -84,6 +96,7 @@ jobs:
         env:
           REVERSE_REPLICATION_CAUGHT_UP: ${{ inputs.reverse_replication_caught_up }}
           GCP_WRITES_FENCED: ${{ inputs.gcp_writes_fenced }}
+          GCP_WRITE_FENCE_MODE: ${{ inputs.gcp_write_fence_mode }}
           CONFIRMATION: ${{ inputs.confirmation }}
         run: |
           set -euo pipefail
@@ -91,14 +104,27 @@ jobs:
             echo "Reverse replication must be caught up before failback." >&2
             exit 1
           }
-          [[ "${GCP_WRITES_FENCED}" == "true" ]] || {
-            echo "GCP writes must be fenced before failback." >&2
-            exit 1
-          }
+          if [[ "${GCP_WRITE_FENCE_MODE}" == "already-unavailable" ]]; then
+            [[ "${GCP_WRITES_FENCED}" == "true" ]] || {
+              echo "Confirm GCP writes are already unavailable before failback." >&2
+              exit 1
+            }
+          fi
           [[ "${CONFIRMATION}" == "FAILBACK_TO_AWS" ]] || {
             echo "Confirmation must equal FAILBACK_TO_AWS." >&2
             exit 1
           }
+
+      - name: Configure kubectl for GKE DR
+        if: inputs.mode == 'failback' && inputs.gcp_write_fence_mode == 'automated'
+        run: |
+          gcloud container clusters get-credentials "${GKE_CLUSTER_NAME}" \
+            --zone "${GKE_CLUSTER_ZONE}" \
+            --project "${GCP_PROJECT_ID}"
+
+      - name: Fence GCP application database writes
+        if: inputs.mode == 'failback' && inputs.gcp_write_fence_mode == 'automated'
+        run: bash scripts/dr/fence-gke-writes.sh fence
 
       - name: Return Route 53 traffic to AWS
         if: inputs.mode == 'failback'

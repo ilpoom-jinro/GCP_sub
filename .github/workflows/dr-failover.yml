@@ -12,10 +12,18 @@ on:
           - preflight
           - failover
       aws_writes_fenced:
-        description: "Confirm AWS application and RDS writes are blocked"
+        description: "Required only when AWS is already unavailable and cannot be fenced automatically"
         required: true
         default: false
         type: boolean
+      aws_write_fence_mode:
+        description: "How to fence AWS application writes before Cloud SQL promotion"
+        required: true
+        default: automated
+        type: choice
+        options:
+          - automated
+          - already-unavailable
       confirmation:
         description: "Required for failover: type FAILOVER_TO_GCP"
         required: false
@@ -34,6 +42,9 @@ env:
   GCP_REGION: asia-northeast3
   DMS_MIGRATION_JOB: aws-rds-to-cloudsql-dr
   CLOUDSQL_INSTANCE: dr-standby-postgres
+  GKE_CLUSTER_NAME: gke-prd-cluster
+  GKE_CLUSTER_ZONE: asia-northeast3-a
+  AWS_DR_WRITE_FENCE_PROJECT: financial-service-dr-write-fence
   AWS_REGION: ${{ secrets.AWS_REGION || 'ap-northeast-2' }}
 
 jobs:
@@ -53,6 +64,8 @@ jobs:
 
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
+        with:
+          install_components: gke-gcloud-auth-plugin
 
       - name: Authenticate to AWS for Route 53
         uses: aws-actions/configure-aws-credentials@v4
@@ -78,17 +91,55 @@ jobs:
         if: inputs.mode == 'failover'
         env:
           AWS_WRITES_FENCED: ${{ inputs.aws_writes_fenced }}
+          AWS_WRITE_FENCE_MODE: ${{ inputs.aws_write_fence_mode }}
           CONFIRMATION: ${{ inputs.confirmation }}
         run: |
           set -euo pipefail
-          [[ "${AWS_WRITES_FENCED}" == "true" ]] || {
-            echo "AWS writes must be fenced before failover." >&2
-            exit 1
-          }
+          if [[ "${AWS_WRITE_FENCE_MODE}" == "already-unavailable" ]]; then
+            [[ "${AWS_WRITES_FENCED}" == "true" ]] || {
+              echo "Confirm AWS writes are already unavailable before promotion." >&2
+              exit 1
+            }
+          fi
           [[ "${CONFIRMATION}" == "FAILOVER_TO_GCP" ]] || {
             echo "Confirmation must equal FAILOVER_TO_GCP." >&2
             exit 1
           }
+
+      - name: Fence AWS application database writes
+        if: inputs.mode == 'failover' && inputs.aws_write_fence_mode == 'automated'
+        run: |
+          set -euo pipefail
+          build_id="$(aws codebuild start-build \
+            --project-name "${AWS_DR_WRITE_FENCE_PROJECT}" \
+            --environment-variables-override name=DR_WRITE_FENCE_ACTION,value=fence,type=PLAINTEXT \
+            --query 'build.id' --output text)"
+          echo "Started AWS write-fence build: ${build_id}"
+
+          for _ in $(seq 1 90); do
+            status="$(aws codebuild batch-get-builds --ids "${build_id}" \
+              --query 'builds[0].buildStatus' --output text)"
+            echo "AWS write-fence status: ${status}"
+            case "${status}" in
+              SUCCEEDED) exit 0 ;;
+              FAILED|FAULT|STOPPED|TIMED_OUT) exit 1 ;;
+            esac
+            sleep 10
+          done
+
+          echo "Timed out waiting for the AWS write-fence build." >&2
+          exit 1
+
+      - name: Configure kubectl for GKE DR
+        if: inputs.mode == 'failover'
+        run: |
+          gcloud container clusters get-credentials "${GKE_CLUSTER_NAME}" \
+            --zone "${GKE_CLUSTER_ZONE}" \
+            --project "${GCP_PROJECT_ID}"
+
+      - name: Remove any previous GCP write fence
+        if: inputs.mode == 'failover'
+        run: bash scripts/dr/fence-gke-writes.sh unfence
 
       - name: Promote Cloud SQL destination
         if: inputs.mode == 'failover'
