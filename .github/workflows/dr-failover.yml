@@ -1,0 +1,117 @@
+name: DR Failover to GCP
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Run checks only, or promote Cloud SQL and fail Route 53 over to GCP"
+        required: true
+        default: preflight
+        type: choice
+        options:
+          - preflight
+          - failover
+      aws_writes_fenced:
+        description: "Confirm AWS application and RDS writes are blocked"
+        required: true
+        default: false
+        type: boolean
+      confirmation:
+        description: "Required for failover: type FAILOVER_TO_GCP"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: production-dr-switch
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: ilpoomjinro
+  GCP_REGION: asia-northeast3
+  DMS_MIGRATION_JOB: aws-rds-to-cloudsql-dr
+  CLOUDSQL_INSTANCE: dr-standby-postgres
+  AWS_REGION: ${{ secrets.AWS_REGION || 'ap-northeast-2' }}
+
+jobs:
+  failover:
+    name: Validate and fail over to GCP
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.TF_SA_EMAIL }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Authenticate to AWS for Route 53
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DR_ROUTE53_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify GCP application endpoint
+        run: curl --fail --silent --show-error --retry 3 https://gcp.ilpumjinro.store/ >/dev/null
+
+      - name: Run database failover preflight
+        run: |
+          scripts/dr/failover-to-gcp.sh \
+            --project "${GCP_PROJECT_ID}" \
+            --region "${GCP_REGION}" \
+            --job "${DMS_MIGRATION_JOB}" \
+            --instance "${CLOUDSQL_INSTANCE}"
+
+      - name: Show Route 53 state
+        run: scripts/dr/route53-primary-health.sh status
+
+      - name: Validate failover approval
+        if: inputs.mode == 'failover'
+        env:
+          AWS_WRITES_FENCED: ${{ inputs.aws_writes_fenced }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          [[ "${AWS_WRITES_FENCED}" == "true" ]] || {
+            echo "AWS writes must be fenced before failover." >&2
+            exit 1
+          }
+          [[ "${CONFIRMATION}" == "FAILOVER_TO_GCP" ]] || {
+            echo "Confirmation must equal FAILOVER_TO_GCP." >&2
+            exit 1
+          }
+
+      - name: Promote Cloud SQL destination
+        if: inputs.mode == 'failover'
+        run: |
+          scripts/dr/failover-to-gcp.sh \
+            --project "${GCP_PROJECT_ID}" \
+            --region "${GCP_REGION}" \
+            --job "${DMS_MIGRATION_JOB}" \
+            --instance "${CLOUDSQL_INSTANCE}" \
+            --aws-writes-fenced \
+            --execute \
+            --confirm PROMOTE_CLOUDSQL_DR
+
+      - name: Fail Route 53 over to GCP
+        if: inputs.mode == 'failover'
+        run: scripts/dr/route53-primary-health.sh failover
+
+      - name: Show final DR state
+        if: always()
+        run: |
+          scripts/dr/status.sh \
+            --project "${GCP_PROJECT_ID}" \
+            --region "${GCP_REGION}" \
+            --job "${DMS_MIGRATION_JOB}" \
+            --instance "${CLOUDSQL_INSTANCE}" || true
+          scripts/dr/route53-primary-health.sh status || true

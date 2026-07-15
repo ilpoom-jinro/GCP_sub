@@ -38,4 +38,4 @@ aws route53 list-resource-record-sets --hosted-zone-id ROUTE53_ZONE_ID
 
 ## 장애 전환 테스트
 
-Route 53 health check를 disabled로 만들면 항상 healthy가 되므로 사용하면 안 된다. 테스트에서는 PRIMARY health check의 `inverted` 값을 활성화해 AWS가 정상이어도 unhealthy로 보이게 한다. 실제 failover/failback workflow는 다음 단계에서 이 값을 안전 확인 절차와 함께 제어한다.
+Route 53 health check를 disabled로 만들면 항상 healthy가 되므로 사용하면 안 된다. 테스트에서는 PRIMARY health check의 `inverted` 값을 활성화해 AWS가 정상이어도 unhealthy로 보이게 한다. 실제 전환은 `DR Failover to GCP`, 복귀는 `DR Failback to AWS` 워크플로를 사용하며 자세한 입력값은 [DR_WORKFLOWS.md](DR_WORKFLOWS.md)를 따른다.

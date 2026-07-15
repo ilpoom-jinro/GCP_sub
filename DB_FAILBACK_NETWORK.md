@@ -78,12 +78,12 @@ sudo headscale nodes list-routes
 sudo headscale nodes approve-routes --identifier <GCP_ROUTER_NODE_ID> --routes 10.50.0.0/16,10.52.0.0/16,10.53.0.0/20,10.177.232.0/24
 ```
 
-정책 파일의 기존 `acls` 배열에 다음 규칙을 추가하고 Headscale 서비스를 재시작합니다. AWS 라우터의 현재 Tailscale IP가 `100.64.0.6`이 아닐 경우 먼저 `sudo tailscale ip -4`로 실제 값을 확인해 바꿉니다.
+정책 파일의 기존 `acls` 배열에 다음 규칙을 추가하고 Headscale 서비스를 재시작합니다. AWS 라우터의 현재 Tailscale IP는 재등록 시 달라질 수 있으므로 먼저 `sudo tailscale ip -4`로 실제 값을 확인해 바꿉니다.
 
 ```json
 {
   "action": "accept",
-  "src": ["100.64.0.6"],
+  "src": ["100.64.0.9"],
   "dst": ["10.177.232.0/24:5432"]
 }
 ```

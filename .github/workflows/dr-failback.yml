@@ -1,0 +1,113 @@
+name: DR Failback to AWS
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Run checks only, or return Route 53 traffic to AWS"
+        required: true
+        default: preflight
+        type: choice
+        options:
+          - preflight
+          - failback
+      reverse_replication_caught_up:
+        description: "Confirm Cloud SQL to RDS replication is caught up with zero lag"
+        required: true
+        default: false
+        type: boolean
+      gcp_writes_fenced:
+        description: "Confirm GCP application and Cloud SQL writes are blocked"
+        required: true
+        default: false
+        type: boolean
+      confirmation:
+        description: "Required for failback: type FAILBACK_TO_AWS"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: production-dr-switch
+  cancel-in-progress: false
+
+env:
+  GCP_PROJECT_ID: ilpoomjinro
+  GCP_REGION: asia-northeast3
+  DMS_MIGRATION_JOB: aws-rds-to-cloudsql-dr
+  CLOUDSQL_INSTANCE: dr-standby-postgres
+  AWS_REGION: ${{ secrets.AWS_REGION || 'ap-northeast-2' }}
+
+jobs:
+  failback:
+    name: Validate and fail back to AWS
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.TF_SA_EMAIL }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Authenticate to AWS for Route 53
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DR_ROUTE53_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify AWS application endpoint
+        run: curl --fail --silent --show-error --retry 3 https://aws.ilpumjinro.store/ >/dev/null
+
+      - name: Run database failback preflight
+        run: |
+          scripts/dr/failback-preflight.sh \
+            --project "${GCP_PROJECT_ID}" \
+            --region "${GCP_REGION}" \
+            --job "${DMS_MIGRATION_JOB}" \
+            --instance "${CLOUDSQL_INSTANCE}"
+
+      - name: Show Route 53 state
+        run: scripts/dr/route53-primary-health.sh status
+
+      - name: Validate failback approval
+        if: inputs.mode == 'failback'
+        env:
+          REVERSE_REPLICATION_CAUGHT_UP: ${{ inputs.reverse_replication_caught_up }}
+          GCP_WRITES_FENCED: ${{ inputs.gcp_writes_fenced }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          [[ "${REVERSE_REPLICATION_CAUGHT_UP}" == "true" ]] || {
+            echo "Reverse replication must be caught up before failback." >&2
+            exit 1
+          }
+          [[ "${GCP_WRITES_FENCED}" == "true" ]] || {
+            echo "GCP writes must be fenced before failback." >&2
+            exit 1
+          }
+          [[ "${CONFIRMATION}" == "FAILBACK_TO_AWS" ]] || {
+            echo "Confirmation must equal FAILBACK_TO_AWS." >&2
+            exit 1
+          }
+
+      - name: Return Route 53 traffic to AWS
+        if: inputs.mode == 'failback'
+        run: scripts/dr/route53-primary-health.sh failback
+
+      - name: Verify public traffic is served
+        if: inputs.mode == 'failback'
+        run: curl --fail --silent --show-error --retry 6 --retry-delay 10 https://ilpumjinro.store/ >/dev/null
+
+      - name: Show final DR state
+        if: always()
+        run: scripts/dr/route53-primary-health.sh status || true

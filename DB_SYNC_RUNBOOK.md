@@ -15,8 +15,8 @@ AWS EKS 서비스의 PostgreSQL RDS를 운영 원본으로 유지하고, 장애 
 | GCP DMS 대상 프로필 | Connection profile | `cloudsql-dr-destination` |
 | GCP DMS 작업 | Migration job | `aws-rds-to-cloudsql-dr`, 지속 복제 |
 | GCP VPC | 네트워크 | `vpc-gcp-prd` |
-| AWS 서브넷 라우터 | Tailscale IP | `100.64.0.6` |
-| GCP 서브넷 라우터 | Tailscale IP | `100.64.0.5` |
+| AWS 서브넷 라우터 | 현재 Tailscale IP | `100.64.0.9` |
+| GCP 서브넷 라우터 | 현재 Tailscale IP | `100.64.0.8` |
 | AWS RDS 사설 IP | 현재 확인값 | `10.10.21.54` |
 | GCP Private Services Access 대역 | Cloud SQL 사설 서비스 대역 | `10.177.232.0/24` |
 
