@@ -155,9 +155,21 @@ jobs:
           test "${gateway_ip}" = "${GATEWAY_STATIC_IP}"
           kubectl -n stock-demo get service stock-gw-istio -o wide
 
-      - name: Verify the application reads Cloud SQL
+      - name: Verify the application reads promoted Cloud SQL
         run: |
           set -euo pipefail
+
+          cloud_sql_master_instance="$(gcloud sql instances describe dr-standby-postgres \
+            --project "${GCP_PROJECT_ID}" \
+            --format='value(masterInstanceName)')"
+
+          if [ -n "${cloud_sql_master_instance}" ]; then
+            echo "Cloud SQL is a DMS standby replica of ${cloud_sql_master_instance}."
+            echo "Skipping application DB-read verification; the next step fences GKE database access."
+            exit 0
+          fi
+
+          echo "Cloud SQL is standalone. Verifying the GKE application reads Cloud SQL."
           kubectl -n stock-demo port-forward service/stock-web 18080:80 >/tmp/stock-web-port-forward.log 2>&1 &
           PORT_FORWARD_PID=$!
           trap 'kill "${PORT_FORWARD_PID}" >/dev/null 2>&1 || true' EXIT
