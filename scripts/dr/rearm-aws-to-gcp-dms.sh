@@ -116,6 +116,20 @@ wait_for_cloudsql_standalone() {
   exit 1
 }
 
+detach_cloudsql_from_dms_master() {
+  local current_master
+  current_master="$(cloudsql_master_instance)"
+  [[ -z "$current_master" ]] && return 0
+
+  # Deleting a DMS job leaves its Cloud SQL destination as a read replica of
+  # the DMS-managed master. Promote it before reusing the same instance.
+  echo "Promoting Cloud SQL replica to detach from DMS master ${current_master}..."
+  gcloud sql instances promote-replica "$CLOUDSQL_INSTANCE" \
+    --project="$PROJECT_ID" \
+    --quiet
+  wait_for_cloudsql_standalone
+}
+
 cloudsql_state="$(gcloud sql instances describe "$CLOUDSQL_INSTANCE" \
   --project="$PROJECT_ID" --format='value(state)')"
 master_instance="$(cloudsql_master_instance)"
@@ -179,7 +193,7 @@ if job_exists; then
   echo "Deleting previous DMS job ${MIGRATION_JOB} without --force..."
   gcloud database-migration migration-jobs delete "$MIGRATION_JOB" \
     --project="$PROJECT_ID" --region="$REGION" --quiet
-  wait_for_cloudsql_standalone
+  detach_cloudsql_from_dms_master
 fi
 
 # A normal job deletion removes its destination profile. Remove a leftover
