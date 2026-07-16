@@ -145,6 +145,9 @@ jobs:
 
       - name: Recreate AWS to GCP DMS cycle
         if: inputs.mode == 'rearm'
+        env:
+          CLOUDSQL_DB_OWNER_USER: ${{ secrets.GCP_DMS_REARM_DB_OWNER_USER }}
+          CLOUDSQL_DB_OWNER_PASSWORD: ${{ secrets.GCP_DMS_REARM_DB_OWNER_PASSWORD }}
         run: |
           scripts/dr/rearm-aws-to-gcp-dms.sh \
             --execute \

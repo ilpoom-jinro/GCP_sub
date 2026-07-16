@@ -10,6 +10,11 @@ SOURCE_PROFILE="${SOURCE_PROFILE:-aws-postgres-source}"
 DESTINATION_PROFILE="${DESTINATION_PROFILE:-cloudsql-dr-destination}"
 CLOUDSQL_INSTANCE="${CLOUDSQL_INSTANCE:-dr-standby-postgres}"
 DATABASE_NAME="${DATABASE_NAME:-financial_service}"
+CLOUDSQL_DB_OWNER_USER="${CLOUDSQL_DB_OWNER_USER:-}"
+CLOUDSQL_DB_OWNER_PASSWORD="${CLOUDSQL_DB_OWNER_PASSWORD:-}"
+KUBERNETES_NAMESPACE="${KUBERNETES_NAMESPACE:-stock-demo}"
+DATABASE_DROP_SECRET="dr-rearm-cloudsql-db-owner"
+DATABASE_DROP_POD="dr-rearm-drop-cloudsql-database"
 
 EXECUTE=false
 GCP_WRITES_FENCED=false
@@ -27,6 +32,10 @@ standalone. Execute mode deletes the previous DMS migration job, its destination
 connection profile, and the existing application database on Cloud SQL. It then
 creates and starts a new AWS RDS -> Cloud SQL continuous migration job using
 the existing Cloud SQL instance.
+
+When the Cloud SQL application database already exists, execute mode drops it
+through a short-lived GKE Pod authenticated as its database owner. Provide the
+owner credentials through CLOUDSQL_DB_OWNER_USER and CLOUDSQL_DB_OWNER_PASSWORD.
 
 The new job performs an initial load from AWS. Run it only after AWS is the
 authoritative writer, public traffic has returned to AWS, and GCP application
@@ -53,6 +62,11 @@ for command in gcloud curl jq; do
     exit 1
   }
 done
+
+database_exists() {
+  gcloud sql databases describe "$DATABASE_NAME" \
+    --instance="$CLOUDSQL_INSTANCE" --project="$PROJECT_ID" >/dev/null 2>&1
+}
 
 job_exists() {
   gcloud database-migration migration-jobs describe "$MIGRATION_JOB" \
@@ -130,6 +144,101 @@ detach_cloudsql_from_dms_master() {
   wait_for_cloudsql_standalone
 }
 
+cloudsql_private_ip() {
+  gcloud sql instances describe "$CLOUDSQL_INSTANCE" \
+    --project="$PROJECT_ID" --format=json |
+    jq -r '.ipAddresses[] | select(.type == "PRIVATE") | .ipAddress' |
+    head -n 1
+}
+
+cleanup_database_drop_resources() {
+  kubectl -n "$KUBERNETES_NAMESPACE" delete pod "$DATABASE_DROP_POD" \
+    --ignore-not-found >/dev/null 2>&1 || true
+  kubectl -n "$KUBERNETES_NAMESPACE" delete secret "$DATABASE_DROP_SECRET" \
+    --ignore-not-found >/dev/null 2>&1 || true
+}
+
+delete_cloudsql_database_as_owner() {
+  command -v kubectl >/dev/null || {
+    echo "kubectl is required to delete the existing Cloud SQL database." >&2
+    exit 1
+  }
+
+  local private_ip phase
+  private_ip="$(cloudsql_private_ip)"
+  [[ -n "$private_ip" ]] || {
+    echo "Cloud SQL instance ${CLOUDSQL_INSTANCE} has no private IP." >&2
+    exit 1
+  }
+  [[ -n "$CLOUDSQL_DB_OWNER_USER" && -n "$CLOUDSQL_DB_OWNER_PASSWORD" ]] || {
+    echo "CLOUDSQL_DB_OWNER_USER and CLOUDSQL_DB_OWNER_PASSWORD are required to delete existing database ${DATABASE_NAME}." >&2
+    exit 1
+  }
+  [[ "$DATABASE_NAME" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || {
+    echo "DATABASE_NAME contains unsupported characters: ${DATABASE_NAME}" >&2
+    exit 1
+  }
+
+  cleanup_database_drop_resources
+  kubectl -n "$KUBERNETES_NAMESPACE" create secret generic "$DATABASE_DROP_SECRET" \
+    --from-literal=password="$CLOUDSQL_DB_OWNER_PASSWORD" >/dev/null
+
+  cat <<EOF | kubectl -n "$KUBERNETES_NAMESPACE" apply -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ${DATABASE_DROP_POD}
+spec:
+  restartPolicy: Never
+  containers:
+    - name: drop-database
+      image: postgres:16
+      command: ["/bin/sh", "-ceu"]
+      args:
+        - |
+          psql -h "\$PGHOST" -p "\$PGPORT" -U "\$PGUSER" -d postgres -v ON_ERROR_STOP=1 \\
+            -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${DATABASE_NAME}' AND pid <> pg_backend_pid();" \\
+            -c 'DROP DATABASE ${DATABASE_NAME};'
+      env:
+        - name: PGHOST
+          value: "${private_ip}"
+        - name: PGPORT
+          value: "5432"
+        - name: PGUSER
+          value: "${CLOUDSQL_DB_OWNER_USER}"
+        - name: PGSSLMODE
+          value: "require"
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: ${DATABASE_DROP_SECRET}
+              key: password
+EOF
+
+  for _ in $(seq 1 60); do
+    phase="$(kubectl -n "$KUBERNETES_NAMESPACE" get pod "$DATABASE_DROP_POD" -o jsonpath='{.status.phase}' 2>/dev/null || true)"
+    case "$phase" in
+      Succeeded)
+        kubectl -n "$KUBERNETES_NAMESPACE" logs "$DATABASE_DROP_POD"
+        cleanup_database_drop_resources
+        return 0
+        ;;
+      Failed)
+        kubectl -n "$KUBERNETES_NAMESPACE" logs "$DATABASE_DROP_POD" >&2 || true
+        cleanup_database_drop_resources
+        echo "Database-owner Pod failed while deleting ${DATABASE_NAME}." >&2
+        exit 1
+        ;;
+    esac
+    sleep 5
+  done
+
+  kubectl -n "$KUBERNETES_NAMESPACE" logs "$DATABASE_DROP_POD" >&2 || true
+  cleanup_database_drop_resources
+  echo "Timed out waiting for the database-owner Pod to delete ${DATABASE_NAME}." >&2
+  exit 1
+}
+
 cloudsql_state="$(gcloud sql instances describe "$CLOUDSQL_INSTANCE" \
   --project="$PROJECT_ID" --format='value(state)')"
 master_instance="$(cloudsql_master_instance)"
@@ -180,6 +289,15 @@ fi
   exit 1
 }
 
+# Check credentials before removing DMS resources so an omitted Secret leaves
+# the currently configured recovery state untouched.
+if database_exists; then
+  [[ -n "$CLOUDSQL_DB_OWNER_USER" && -n "$CLOUDSQL_DB_OWNER_PASSWORD" ]] || {
+    echo "GCP_DMS_REARM_DB_OWNER_USER and GCP_DMS_REARM_DB_OWNER_PASSWORD must be configured before rearming DMS." >&2
+    exit 1
+  }
+fi
+
 # The source profile is provisioned with REQUIRED TLS before the first DMS
 # cycle. Re-patching it here makes DMS revalidate an obsolete Cloud SQL master
 # after a promotion, even though this rearm does not change the source profile.
@@ -207,11 +325,9 @@ fi
 # DMS requires an empty Cloud SQL destination for a new initial load. The
 # failback baseline and any prior Cloud SQL writes are authoritative on AWS at
 # this point, and GCP writes are fenced before this destructive step.
-if gcloud sql databases describe "$DATABASE_NAME" \
-  --instance="$CLOUDSQL_INSTANCE" --project="$PROJECT_ID" >/dev/null 2>&1; then
+if database_exists; then
   echo "Deleting existing Cloud SQL database ${DATABASE_NAME} before the AWS initial load..."
-  gcloud sql databases delete "$DATABASE_NAME" \
-    --instance="$CLOUDSQL_INSTANCE" --project="$PROJECT_ID" --quiet
+  delete_cloudsql_database_as_owner
 fi
 
 echo "Creating Cloud SQL destination profile..."

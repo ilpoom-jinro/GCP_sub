@@ -19,6 +19,8 @@ GCP_sub repository secret에는 아래 두 값도 필요하다.
 
 - `GCP_DR_DB_USER`: Cloud SQL 관리자 사용자명(기본값 `postgres`)
 - `GCP_DR_DB_PASSWORD`: 해당 Cloud SQL 관리자 비밀번호
+- `GCP_DMS_REARM_DB_OWNER_USER`: `financial_service` 데이터베이스 소유자 사용자명. DMS 재구성 시 기존 Cloud SQL 데이터베이스를 삭제하는 데 사용합니다.
+- `GCP_DMS_REARM_DB_OWNER_PASSWORD`: 위 데이터베이스 소유자 비밀번호
 
 실제 failback을 실행할 때 워크플로는 이 두 값을 AWS의 전용 Secrets Manager 시크릿으로
 한 번만 전달합니다. 값 자체는 GitHub Actions 로그, SSM 명령 인자, Terraform state에 남지 않습니다.
