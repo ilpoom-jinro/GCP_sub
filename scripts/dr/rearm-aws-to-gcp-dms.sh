@@ -23,9 +23,10 @@ Usage:
       [--project PROJECT_ID] [--region REGION] [--network NETWORK]
 
 Preflight verifies that the prior Cloud SQL destination was promoted and is now
-standalone. Execute mode deletes only the previous DMS migration job and its
-destination connection profile, then creates and starts a new AWS RDS -> Cloud
-SQL continuous migration job using the existing Cloud SQL instance.
+standalone. Execute mode deletes the previous DMS migration job, its destination
+connection profile, and the existing application database on Cloud SQL. It then
+creates and starts a new AWS RDS -> Cloud SQL continuous migration job using
+the existing Cloud SQL instance.
 
 The new job performs an initial load from AWS. Run it only after AWS is the
 authoritative writer, public traffic has returned to AWS, and GCP application
@@ -97,10 +98,27 @@ run_async_dms_command() {
   wait_for_operation "$operation"
 }
 
+cloudsql_master_instance() {
+  gcloud sql instances describe "$CLOUDSQL_INSTANCE" \
+    --project="$PROJECT_ID" --format='value(masterInstanceName)'
+}
+
+wait_for_cloudsql_standalone() {
+  for _ in $(seq 1 180); do
+    local current_master
+    current_master="$(cloudsql_master_instance)"
+    [[ -z "$current_master" ]] && return 0
+    echo "Waiting for Cloud SQL to detach from DMS master ${current_master}..."
+    sleep 10
+  done
+
+  echo "Cloud SQL did not return to standalone mode after deleting the DMS job." >&2
+  exit 1
+}
+
 cloudsql_state="$(gcloud sql instances describe "$CLOUDSQL_INSTANCE" \
   --project="$PROJECT_ID" --format='value(state)')"
-master_instance="$(gcloud sql instances describe "$CLOUDSQL_INSTANCE" \
-  --project="$PROJECT_ID" --format='value(masterInstanceName)')"
+master_instance="$(cloudsql_master_instance)"
 job_state="missing"
 if job_exists; then
   job_state="$(gcloud database-migration migration-jobs describe "$MIGRATION_JOB" \
@@ -115,7 +133,7 @@ echo "Previous DMS job state: ${job_state}"
   echo "DMS rearm blocked: Cloud SQL is not RUNNABLE." >&2
   exit 1
 }
-[[ -z "$master_instance" ]] || {
+[[ -z "$master_instance" || "$job_state" != "missing" ]] || {
   echo "DMS rearm blocked: Cloud SQL is still a replica." >&2
   exit 1
 }
@@ -130,9 +148,10 @@ Preflight passed. No DMS resource was changed.
 
 Execute mode will:
   1. Delete the previous DMS job and its destination profile without --force.
-  2. Keep the Cloud SQL instance, private IP, and Terraform state intact.
-  3. Recreate the destination profile and a continuous ${DATABASE_NAME} migration.
-  4. Demote Cloud SQL into the new DMS standby role, verify, and start CDC.
+  2. Delete the existing Cloud SQL database ${DATABASE_NAME}.
+  3. Keep the Cloud SQL instance, private IP, and Terraform state intact.
+  4. Recreate the destination profile and a continuous ${DATABASE_NAME} migration.
+  5. Demote Cloud SQL into the new DMS standby role, verify, and start CDC.
 
 The new initial load makes AWS RDS authoritative for ${DATABASE_NAME}. Keep
 GCP writes fenced until the next planned failover.
@@ -160,6 +179,7 @@ if job_exists; then
   echo "Deleting previous DMS job ${MIGRATION_JOB} without --force..."
   gcloud database-migration migration-jobs delete "$MIGRATION_JOB" \
     --project="$PROJECT_ID" --region="$REGION" --quiet
+  wait_for_cloudsql_standalone
 fi
 
 # A normal job deletion removes its destination profile. Remove a leftover
@@ -168,6 +188,16 @@ if profile_exists "$DESTINATION_PROFILE"; then
   echo "Deleting leftover destination profile ${DESTINATION_PROFILE} without --force..."
   gcloud database-migration connection-profiles delete "$DESTINATION_PROFILE" \
     --project="$PROJECT_ID" --region="$REGION" --quiet
+fi
+
+# DMS requires an empty Cloud SQL destination for a new initial load. The
+# failback baseline and any prior Cloud SQL writes are authoritative on AWS at
+# this point, and GCP writes are fenced before this destructive step.
+if gcloud sql databases describe "$DATABASE_NAME" \
+  --instance="$CLOUDSQL_INSTANCE" --project="$PROJECT_ID" >/dev/null 2>&1; then
+  echo "Deleting existing Cloud SQL database ${DATABASE_NAME} before the AWS initial load..."
+  gcloud sql databases delete "$DATABASE_NAME" \
+    --instance="$CLOUDSQL_INSTANCE" --project="$PROJECT_ID" --quiet
 fi
 
 echo "Creating Cloud SQL destination profile..."
