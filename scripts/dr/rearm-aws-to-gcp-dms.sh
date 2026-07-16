@@ -151,18 +151,10 @@ fi
   exit 1
 }
 
-echo "Enforcing REQUIRED TLS on the Terraform-managed DMS source profile..."
-profile_url="https://datamigration.googleapis.com/v1/projects/${PROJECT_ID}/locations/${REGION}/connectionProfiles/${SOURCE_PROFILE}"
-profile_operation="$(curl --fail --silent --show-error --request PATCH \
-  --header "Authorization: Bearer $(gcloud auth print-access-token)" \
-  --header 'Content-Type: application/json' \
-  --data '{"postgresql":{"ssl":{"type":"REQUIRED"}}}' \
-  "${profile_url}?updateMask=postgresql.ssl" | jq -r '.name // empty')"
-[[ -n "$profile_operation" ]] || {
-  echo "Updating the DMS source TLS profile did not return an operation." >&2
-  exit 1
-}
-wait_for_operation "$profile_operation"
+# The source profile is provisioned with REQUIRED TLS before the first DMS
+# cycle. Re-patching it here makes DMS revalidate an obsolete Cloud SQL master
+# after a promotion, even though this rearm does not change the source profile.
+echo "Keeping the existing REQUIRED TLS configuration on DMS source profile ${SOURCE_PROFILE}."
 
 if job_exists; then
   echo "Deleting previous DMS job ${MIGRATION_JOB} without --force..."
