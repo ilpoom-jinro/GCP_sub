@@ -147,10 +147,6 @@ echo "Previous DMS job state: ${job_state}"
   echo "DMS rearm blocked: Cloud SQL is not RUNNABLE." >&2
   exit 1
 }
-[[ -z "$master_instance" || "$job_state" != "missing" ]] || {
-  echo "DMS rearm blocked: Cloud SQL is still a replica." >&2
-  exit 1
-}
 [[ "$job_state" != "RUNNING" ]] || {
   echo "DMS rearm blocked: the existing AWS -> GCP job is still RUNNING." >&2
   exit 1
@@ -193,8 +189,12 @@ if job_exists; then
   echo "Deleting previous DMS job ${MIGRATION_JOB} without --force..."
   gcloud database-migration migration-jobs delete "$MIGRATION_JOB" \
     --project="$PROJECT_ID" --region="$REGION" --quiet
-  detach_cloudsql_from_dms_master
 fi
+
+# A prior interrupted rearm can already have deleted the job while leaving the
+# Cloud SQL destination attached to its DMS-managed master. Handle both the
+# normal and interrupted states before reusing the instance.
+detach_cloudsql_from_dms_master
 
 # A normal job deletion removes its destination profile. Remove a leftover
 # profile only when a previous interrupted run left one behind; never use force.
