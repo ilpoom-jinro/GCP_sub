@@ -39,5 +39,10 @@ jobs:
       - name: Terraform Init
         run: terraform init
 
+      # 이전에 비정상 종료된 Apply 작업이 남긴 state lock을 이번 1회 해제합니다.
+      # Destroy 성공 후에는 이 단계를 제거하세요.
+      - name: Unlock stale Terraform state
+        run: terraform force-unlock -force 1784484010395054
+
       - name: Terraform Destroy
         run: terraform destroy -auto-approve -input=false
