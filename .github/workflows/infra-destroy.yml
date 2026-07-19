@@ -11,6 +11,7 @@ jobs:
     env:
       TF_VAR_org_id: ${{ secrets.GCP_ORG_ID }}
       TF_VAR_project_number: ${{ secrets.GCP_PROJECT_NUMBER }}
+      TF_VAR_tailscale_auth_key: ${{ secrets.TAILSCALE_AUTH_KEY }}
 
     defaults:
       run:
@@ -39,4 +40,4 @@ jobs:
         run: terraform init
 
       - name: Terraform Destroy
-        run: terraform destroy -auto-approve
+        run: terraform destroy -auto-approve -input=false
