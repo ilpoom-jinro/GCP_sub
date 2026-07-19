@@ -12,9 +12,6 @@ resource "google_kms_crypto_key" "sql_disk_key" {
   key_ring        = google_kms_key_ring.db_keyring.id
   rotation_period = "7776000s" # 90일마다 자동으로 열쇠를 교체(Rotation)하도록 설정 (보안 정석)
 
-  lifecycle {
-    prevent_destroy = true # 실수로 열쇠를 삭제하면 데이터가 영구 소실되므로 방어막을 칩니다.
-  }
 }
 
 # 3. Cloud SQL 서비스 에이전트(신분증) 가져오기
