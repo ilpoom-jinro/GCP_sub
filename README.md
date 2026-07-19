@@ -59,7 +59,6 @@ flowchart LR
     AWS -->|DMS 지속 복제| SQL
 ```
 
-정확한 리소스 배치와 역할은 [GCP 인프라 다이어그램](GCP_Infrastructure_Architecture.drawio), [AWS-GCP DR 다이어그램](GCP_AWS_DR_Architecture.drawio), [DR 역할 다이어그램](GCP_DR_Role_Architecture.drawio)에서 확인할 수 있습니다.
 
 ### 전환 원칙
 
