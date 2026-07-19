@@ -41,6 +41,14 @@ jobs:
         run: terraform init
         working-directory: ./infra/GKE
 
+      # 이미 삭제된 gke-app-sa의 IAM 바인딩은 원격 삭제 없이 state에서만 제거합니다.
+      - name: Remove stale Workload Identity binding from state
+        run: |
+          if terraform state list | grep -Fxq 'google_service_account_iam_member.workload_identity_binding'; then
+            terraform state rm google_service_account_iam_member.workload_identity_binding
+          fi
+        working-directory: ./infra/GKE
+
       - name: Terraform Destroy (GKE)
         run: terraform destroy -auto-approve -input=false
         working-directory: ./infra/GKE

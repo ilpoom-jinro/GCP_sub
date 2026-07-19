@@ -73,22 +73,3 @@ resource "google_container_node_pool" "spot_nodes" {
     ignore_changes = [node_count]
   }
 }
-
-# 4. 경한님이 생성한 서비스 계정 정보 불러오기
-data "google_service_account" "gke_sa" {
-  account_id = "gke-app-sa"
-}
-
-# 5. Workload Identity IAM 바인딩
-resource "google_service_account_iam_member" "workload_identity_binding" {
-  # 위에서 검색해 온 서비스 계정의 이름을 사용함
-  service_account_id = data.google_service_account.gke_sa.name
-  role               = "roles/iam.workloadIdentityUser"
-
-  member = "serviceAccount:${var.project_id}.svc.id.goog[default/app-ksa]"
-
-  # 클러스터 생성 후 안전하게 바인딩
-  depends_on = [
-    google_container_cluster.primary
-  ]
-}
