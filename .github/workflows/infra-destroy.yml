@@ -36,8 +36,17 @@ jobs:
         with:
           terraform_version: "1.5.0"
 
-      - name: Terraform Init
+      # base 네트워크를 삭제하기 전에 별도 state로 관리되는 GKE부터 제거합니다.
+      - name: Terraform Init (GKE)
+        run: terraform init
+        working-directory: ./infra/GKE
+
+      - name: Terraform Destroy (GKE)
+        run: terraform destroy -auto-approve -input=false
+        working-directory: ./infra/GKE
+
+      - name: Terraform Init (Base)
         run: terraform init
 
-      - name: Terraform Destroy
+      - name: Terraform Destroy (Base)
         run: terraform destroy -auto-approve -input=false
